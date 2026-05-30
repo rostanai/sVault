@@ -1,13 +1,25 @@
-import { Settings } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { getMe } from "@/lib/api";
+import SettingsClient from "./settings-client";
 
-export default function SettingsPage() {
-  return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <Settings className="mb-3 h-10 w-10 text-zinc-300" />
-      <h2 className="text-xl font-semibold">Settings</h2>
-      <p className="mt-2 max-w-sm text-sm text-zinc-500">
-        User and organization settings are coming in a future milestone.
-      </p>
-    </div>
-  );
+export default async function SettingsPage() {
+  const supabase = await createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const token = session?.access_token ?? "";
+
+  // Fetch the caller's role so the client can show/hide management controls.
+  let role = "viewer";
+  if (token) {
+    try {
+      const me = await getMe(token);
+      role = me.role ?? "viewer";
+    } catch {
+      // Non-fatal — fall back to viewer (no management controls shown).
+    }
+  }
+
+  return <SettingsClient token={token} currentUserRole={role} />;
 }

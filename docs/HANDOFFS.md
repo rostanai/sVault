@@ -317,3 +317,60 @@
   - `/app/settings` → settings (protected, dynamic)
   - `/privacy`, `/terms`, `/refund` → legal pages (public, SSG)
   - `/alerts`, `/billing`, `/policies`, `/settings` → static redirects → `/app/*`
+
+### 2026-05-31 — auth-rbac-engineer — team/user-management endpoints
+- Did: Added admin-only, tenant-scoped team-management API to the backend (`complete-features` branch).
+  - New router `app/api/v1/users.py` (registered in `app/api/v1/router.py`), all guarded by `require_permission("user:manage")` (admins; super_admin bypasses):
+    - `GET /api/v1/users` — list profiles in caller's tenant (ordered by created_at), `list[ProfileRead]`.
+    - `PATCH /api/v1/users/{user_id}` — update `role` (+ optional `is_active`); cross-tenant target → `not_found` (404); blocks demoting/deactivating the **last active admin** → 409 conflict; returns `ProfileRead`.
+    - `GET /api/v1/invitations` — list PENDING (unaccepted, unexpired) invites for the tenant, `list[InvitationRead]`. (GET; existing invitations router only owns POST — no route collision.)
+  - New `app/services/user_service.py`: `list_users`, `update_user`, `count_admins` (active admins), pure `would_remove_last_admin(...)` guard, `list_pending_invitations`. Strict `tenant_id` scoping in-service; RLS is the DB-side second line.
+  - Schemas in `app/schemas/m1.py`: `ProfileRead` (from_attributes), `RoleUpdate {role: TenantRole, is_active: bool|None}`.
+  - Tests `tests/test_users.py`: unit tests for the last-admin guard logic (no DB) + all three endpoints return 401 without a bearer token.
+- Ready for: ui to consume `/users`, `/users/{id}`, `/invitations`; db-architect to confirm RLS mirrors the last-admin/tenant-scope rules.
+- Contract updated: PERMISSIONS already defines `user:manage` (Admin only) — no change needed; HANDOFFS.
+- Note: `ruff check .` / `pytest -q` could not be executed in this session (Bash denied for the venv/test invocation); changes were reviewed manually against ruff rules (E/F/I/UP/B, line-length 100, B008 via module-level dep singletons). Re-run before merge.
+
+### 2026-05-31 — ui-ux-designer — complete-features: Razorpay checkout, document vault UI, team page, split-screen login (branch complete-features)
+
+- Did: Implemented four frontend features on branch `complete-features`.
+
+  **1. Real Razorpay checkout** (`src/app/app/billing/billing-client.tsx`):
+  - Added `subscribe(token, planId) → POST /billing/subscribe` to `src/lib/api.ts` returning `SubscribeResponse` (subscription_id, status, plan_id, razorpay_subscription_id, short_url).
+  - Billing client loads checkout.js via Next `<Script strategy="lazyOnload" />`.
+  - `handleUpgrade`: calls `subscribe`, if `razorpay_subscription_id` → opens `new window.Razorpay({key: NEXT_PUBLIC_RAZORPAY_KEY_ID, subscription_id, name:"sVault", theme:{color:"#2746c9"}, handler: toast+refreshSubscription})`. Fallback to `short_url` if Razorpay script blocked. Dev/no-keys path: toast only. `declare global { interface Window { Razorpay: any } }` added.
+  - Per-card `isUpgrading` state with `<Loader2>` spinner. `refreshSubscription` callback with 3s delay waits for webhook propagation.
+
+  **2. Document upload / vault** (`src/app/app/policies/[id]/policy-detail-client.tsx`):
+  - New API functions in `src/lib/api.ts`: `getDocumentUploadUrl`, `uploadFileToStorage` (raw PUT, no auth header), `recordDocument`, `listDocuments`, `deleteDocument`; types `UploadUrlResponse`, `DocumentRead`, `DocType`.
+  - `DocumentsCard` component (inline): file input (accept `.pdf,.png,.jpg,.jpeg,.webp`, max 20 MB, client-side validation with sonner toasts on violation), three-step upload (get signed URL → PUT to storage → POST to backend to record), list with file name/size/version/date, Download (open download_url in new tab), Delete (with per-doc loading state). Refreshes list after upload and delete. Loading skeleton and empty state.
+
+  **3. Team / Users page** (`src/app/app/settings/`):
+  - New API functions: `getUsers`, `updateUser`, `getInvitations`, `createInvitation`; types `ProfileRead`, `RoleUpdate`, `InvitationRead`.
+  - `settings/page.tsx` (Server Component): fetches session token + calls `getMe` to get caller role, passes `token` + `currentUserRole` to `SettingsClient`.
+  - `settings/settings-client.tsx` (new Client Component): members table with inline role `<Select>` (PATCH on change) and active `<Switch>` (PATCH on toggle), each with per-row saving spinners. "Invite member" dialog (email + role → POST /invitations → shows invite link with copy button). Pending invitations table. Management controls visible only when `currentUserRole === "admin"`.
+  - New `src/components/ui/switch.tsx` (shadcn new-york, `@radix-ui/react-switch`).
+
+  **4. Split-screen login** (`src/app/login/login-form.tsx`):
+  - Two-column layout: left panel (lg+ only) — brand gradient `oklch(0.55 0.20 255) → oklch(0.40 0.18 255)`, Shield icon wordmark, tagline "Never miss an insurance renewal again.", 3 value bullets (Bell/FileText/Sparkles icons). Right panel: `<Logo/>` + "← Back to home" link, `<Tabs>` for Sign in / Create account, each with Google OAuth button + email-password form. All existing auth logic preserved.
+  - New `src/components/ui/tabs.tsx` (shadcn new-york, `@radix-ui/react-tabs`).
+  - Responsive: single-column on mobile, split ≥ lg. Dark-mode compatible. Accessible (labels, focus rings, aria-labels).
+
+- Files created / changed:
+  - `frontend/src/lib/api.ts` — extended with subscribe, document, user/invitation functions + types
+  - `frontend/src/app/app/billing/billing-client.tsx` — Razorpay checkout (replaced stub)
+  - `frontend/src/app/app/policies/[id]/policy-detail-client.tsx` — DocumentsCard (replaced stub)
+  - `frontend/src/app/app/settings/page.tsx` — now a Server Component fetching role
+  - `frontend/src/app/app/settings/settings-client.tsx` — NEW: full team management client
+  - `frontend/src/app/login/login-form.tsx` — split-screen redesign
+  - `frontend/src/app/login/page.tsx` — unchanged (Suspense wrapper kept)
+  - `frontend/src/components/ui/switch.tsx` — NEW: shadcn Switch (@radix-ui/react-switch)
+  - `frontend/src/components/ui/tabs.tsx` — NEW: shadcn Tabs (@radix-ui/react-tabs)
+
+- Notes / compile confidence:
+  - `@radix-ui/react-switch` and `@radix-ui/react-tabs` confirmed pre-installed.
+  - `forwardRef` used in switch.tsx / tabs.tsx — React 19 supports this as a compat layer; no breakage expected. Tech-lead may optionally refactor to refs-as-props once all shadcn primitives are updated.
+  - `NEXT_PUBLIC_RAZORPAY_KEY_ID` env var must be set in Vercel for the checkout key.
+  - Document upload raw PUT goes directly to Supabase Storage (signed URL) — bypasses apiFetch so no auth header is sent (correct per Supabase Storage spec).
+  - `getMe` is called server-side in settings/page.tsx with `silent: true` already set on that function — non-fatal if it fails (falls back to "viewer").
+  - Tech-lead to run `npm run typecheck && npm run build` before merge.

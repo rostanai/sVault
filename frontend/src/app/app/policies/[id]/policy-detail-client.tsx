@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getPolicy, type PolicyRead } from "@/lib/api";
+import {
+  getPolicy,
+  listDocuments,
+  getDocumentUploadUrl,
+  uploadFileToStorage,
+  recordDocument,
+  deleteDocument,
+  type PolicyRead,
+  type DocumentRead,
+} from "@/lib/api";
 import {
   formatDate,
   formatINR,
@@ -19,7 +28,33 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, AlertTriangle } from "lucide-react";
+import {
+  ArrowLeft,
+  AlertTriangle,
+  Upload,
+  Loader2,
+  FileText,
+  Download,
+  Trash2,
+  Paperclip,
+} from "lucide-react";
+import { toast } from "sonner";
+
+const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
+const ALLOWED_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+];
+const ALLOWED_EXTS = ".pdf,.png,.jpg,.jpeg,.webp";
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface Props {
   id: string;
@@ -129,18 +164,10 @@ export default function PolicyDetailClient({ id, token }: Props) {
         </CardContent>
       </Card>
 
-      {/* Documents + Alerts stubs */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold">Documents</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-zinc-400">
-            Document upload coming in the next milestone.
-          </p>
-        </CardContent>
-      </Card>
+      {/* Documents */}
+      <DocumentsCard policyId={id} token={token} />
 
+      {/* Alert Schedule stub */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-semibold">Alert Schedule</CardTitle>
@@ -154,6 +181,220 @@ export default function PolicyDetailClient({ id, token }: Props) {
     </div>
   );
 }
+
+// ── Documents card ─────────────────────────────────────────────────────────────
+
+function DocumentsCard({
+  policyId,
+  token,
+}: {
+  policyId: string;
+  token: string;
+}) {
+  const [docs, setDocs] = useState<DocumentRead[]>([]);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function loadDocs() {
+    setDocsLoading(true);
+    listDocuments(token, policyId)
+      .then(setDocs)
+      .catch((err: Error) => {
+        toast.error("Failed to load documents", { description: err.message });
+      })
+      .finally(() => setDocsLoading(false));
+  }
+
+  useEffect(() => {
+    if (token) loadDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policyId, token]);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset the input so the same file can be re-selected after an error.
+    e.target.value = "";
+
+    // Client-side validation
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error("Unsupported file type.", {
+        description: "Please upload a PDF, PNG, JPG, or WebP.",
+      });
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      toast.error("File too large.", {
+        description: "Maximum file size is 20 MB.",
+      });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      // Step 1 — get a signed PUT URL from the backend.
+      const { upload_url, storage_path } = await getDocumentUploadUrl(
+        token,
+        policyId,
+        { file_name: file.name, content_type: file.type }
+      );
+
+      // Step 2 — PUT the raw bytes directly to Supabase Storage.
+      await uploadFileToStorage(upload_url, file);
+
+      // Step 3 — record the document in the DB so the backend creates the row.
+      await recordDocument(token, policyId, {
+        storage_path,
+        file_name: file.name,
+        content_type: file.type,
+        size_bytes: file.size,
+        doc_type: "policy",
+      });
+
+      toast.success(`"${file.name}" uploaded.`);
+      loadDocs();
+    } catch (err: unknown) {
+      // apiFetch already shows a toast for backend errors; only catch storage errors here.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith("Storage upload failed")) {
+        toast.error("Upload failed.", { description: msg });
+      }
+      // Otherwise apiFetch already toasted.
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(doc: DocumentRead) {
+    setDeletingId(doc.id);
+    try {
+      await deleteDocument(token, doc.id);
+      toast.success(`"${doc.file_name}" deleted.`);
+      loadDocs();
+    } catch {
+      // apiFetch already showed a toast.
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
+        <CardTitle className="text-sm font-semibold">Documents</CardTitle>
+        <div>
+          {/* Hidden file input */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept={ALLOWED_EXTS}
+            className="sr-only"
+            aria-label="Upload policy document"
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Uploading…
+              </>
+            ) : (
+              <>
+                <Upload className="mr-1.5 h-4 w-4" />
+                Upload
+              </>
+            )}
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+        {docsLoading ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Skeleton className="h-8 w-8 rounded" />
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-3 w-48" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : docs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <Paperclip className="mb-2 h-7 w-7 text-zinc-300" />
+            <p className="text-sm text-zinc-500">No documents attached.</p>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Upload a PDF or image (max 20 MB).
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {docs.map((doc) => (
+              <li key={doc.id} className="flex items-center gap-3 py-2.5">
+                <FileText className="h-5 w-5 shrink-0 text-zinc-400" />
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="truncate text-sm font-medium"
+                    title={doc.file_name}
+                  >
+                    {doc.file_name}
+                  </p>
+                  <p className="text-xs text-zinc-400">
+                    {formatBytes(doc.size_bytes)} &middot; v{doc.version} &middot;{" "}
+                    {formatDate(doc.created_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    asChild
+                    aria-label={`Download ${doc.file_name}`}
+                  >
+                    <a
+                      href={doc.download_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Download className="h-4 w-4" />
+                    </a>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Delete ${doc.file_name}`}
+                    disabled={deletingId === doc.id}
+                    onClick={() => handleDelete(doc)}
+                    className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  >
+                    {deletingId === doc.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Skeleton / Error helpers ───────────────────────────────────────────────────
 
 function DetailSkeleton() {
   return (
