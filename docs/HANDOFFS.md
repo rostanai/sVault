@@ -67,6 +67,60 @@
 - Ready for: user sign-off on plan; resolve Q5/Q6/Q10–Q12; authenticate Supabase MCP + restart → start M0.
 - Contract updated: PRD.md, BUILD_PLAN.md (new), CLAUDE, TEAM.
 
+### 2026-05-30 — billing-engineer — M5 billing backend slice (branch m5-billing)
+
+- Did: Built the full M5 billing backend. 81 tests green, ruff clean.
+  - **ORM models** (`app/db/models/billing.py`): `Plan`, expanded `Subscription` (added
+    current_period_start/end, cancel_at_period_end, razorpay_customer_id/subscription_id),
+    `Invoice`, `BillingEvent`, `PlatformSetting`. All enums `create_type=False`.
+  - **Config** (`app/core/config.py`): added `razorpay_key_id`, `razorpay_key_secret`,
+    `razorpay_webhook_secret`, `secrets_encryption_key`.
+  - **Secrets store** (`app/core/secrets_store.py`): Fernet encrypt/decrypt/mask;
+    raises `internal_error` if key unconfigured; never stores plaintext.
+  - **Razorpay client** (`app/core/razorpay.py`): `create_plan`, `create_subscription`,
+    `fetch_subscription` (httpx Basic auth, 10s timeout, `upstream_error` on failure);
+    `verify_webhook_signature` — pure HMAC-SHA256 function, unit-testable.
+  - **Entitlements** (`app/services/entitlements.py`): `feature_allowed` + `within_limit`
+    (pure, no DB); `get_entitlements` / `has_feature` / `check_limit` (DB-backed);
+    `require_entitlement(feature)` FastAPI dep factory (403 entitlement_required);
+    Free + Pro defaults; -1 = unlimited; trialing → Pro, cancelled/expired → Free.
+  - **Subscription service** (`app/services/subscription_service.py`): `get_current`,
+    `list_active_plans`, `start_or_update_subscription`, `handle_webhook` (idempotent
+    via `billing_events.event_id` unique constraint + IntegrityError race guard).
+  - **Platform service** (`app/services/platform_service.py`): plans CRUD; settings
+    get/set (encrypt on write, mask on read); tenant list/suspend/activate.
+  - **Schemas** (`app/schemas/billing.py`): PlanRead/Create/Update, SubscriptionRead,
+    SubscriptionWithEntitlements, SubscribeRequest/Response, SettingRead/Write, TenantRead.
+  - **Billing endpoints** (`app/api/v1/billing.py`): GET /plans, GET /billing/subscription,
+    POST /billing/subscribe, POST /billing/webhook. Webhook uses `_sig_check` dep
+    (no DB dep) that raises AppError(400) on bad signature before get_db is reached.
+  - **Platform endpoints** (`app/api/v1/platform.py`): GET/POST/PATCH /platform/plans,
+    GET/PUT /platform/settings/{key}, GET /platform/tenants,
+    POST /platform/tenants/{id}/suspend|activate. All guarded by `require_super_admin`
+    (returns 404 to non-super-admins — platform route invisibility).
+  - **Router** (`app/api/v1/router.py`): registered billing + platform routers.
+  - **Tests** (`tests/test_m5_billing.py`): 31 tests — feature_allowed/within_limit
+    pure logic (free vs pro), webhook sig verification (valid/tampered/wrong/unconfigured),
+    secrets_store round-trip + ciphertext-not-plaintext, require_super_admin 404 behavior,
+    endpoint 401 guards (billing + platform), webhook 400 without/with-bad-sig, ORM smoke.
+  - **Plan map** (`docs/PLANS.md`): full feature + limit matrix, entitlement JSON shape,
+    lifecycle transitions, enforcement reference.
+  - `cryptography>=42.0` added explicitly to `pyproject.toml` deps.
+- Stubs / assumptions:
+  - Razorpay keys absent → `create_subscription` skipped (local record still persisted);
+    plan's `razorpay_plan_id` must be set by Super Admin for live Razorpay flow.
+  - INR prices + exact limits are TBD (DECISIONS Q6 open); Super Admin sets them via
+    platform console.
+  - `billing_period` stored as text ("monthly"/"annual"); Razorpay interval maps 1:1.
+  - Trial→paid conversion via POST /billing/subscribe with a paid plan_id.
+  - Dunning emails (failed payment) coordinated with notifications-engineer (not built here).
+  - Analytics entitlement stored as bool; basic/full distinction is a frontend concern.
+- Pending / next:
+  - notifications-engineer: send T-3/T-1/expiry trial reminders + payment failure dunning.
+  - api-engineer: protect gated endpoints with `require_entitlement` / `check_limit` calls.
+  - devops: set RAZORPAY_KEY_ID/SECRET/WEBHOOK_SECRET + SECRETS_ENCRYPTION_KEY in Vercel env.
+  - Super Admin console UI (ui-ux-designer): plan CRUD + settings forms.
+
 ### 2026-05-30 — tech-lead — error-handling & debugging standard
 - Did: Wrote `docs/ERROR_HANDLING.md` — backend error envelope + code taxonomy + request_id tracing + global handlers, **404-not-403 cross-tenant**, external-service resilience (timeouts/retries/circuit-breakers/idempotency/dead-letter for Razorpay/WhatsApp/SMS/Claude), frontend error boundaries + envelope→friendly UX, debugging/observability (structured logs, Sentry, replay). Added TEAM constraint #18; updated api-engineer + ui-ux-designer agents; CONSIDERATIONS A7b; CLAUDE doc map.
 - Contract updated: ERROR_HANDLING.md (new), TEAM, CONSIDERATIONS, CLAUDE; agents api/ui.

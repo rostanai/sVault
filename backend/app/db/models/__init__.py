@@ -9,7 +9,13 @@ from app.db.models.alerts import (  # noqa: F401
     AlertRule,
     NotificationLog,
 )
-from app.db.models.billing import Subscription  # noqa: F401
+from app.db.models.billing import (  # noqa: F401
+    BillingEvent,
+    Invoice,
+    Plan,
+    PlatformSetting,
+    Subscription,
+)
 from app.db.models.insurance import (  # noqa: F401
     Policy,
     PolicyDocument,
@@ -23,7 +29,8 @@ from app.db.models.tenancy import (  # noqa: F401
 )
 
 __all__ = [
-    "Tenant", "Organization", "Profile", "Invitation", "Subscription",
+    "Tenant", "Organization", "Profile", "Invitation",
+    "Plan", "Subscription", "Invoice", "BillingEvent", "PlatformSetting",
     "Provider", "Policy", "PolicyDocument",
     "AlertRule", "Alert", "NotificationLog",
 ]

@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     email_api_key: str = ""
 
+    # Razorpay (billing — M5). Empty = billing runs in "simulated" mode.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+
+    # Secrets store — Fernet symmetric key (base64-urlsafe, 32 bytes).
+    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key())"
+    secrets_encryption_key: str = ""
+
     @property
     def is_prod(self) -> bool:
         return self.env == "prod"
