@@ -1,0 +1,35 @@
+# ---- secrets / env (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.pem
+.claude.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# ---- Vercel / Supabase ----
+.vercel/
+supabase/.branches/
+supabase/.temp/
+
+# ---- misc ----
+.DS_Store
+*.log
+.idea/
+.vscode/

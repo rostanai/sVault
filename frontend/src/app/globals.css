@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* Tailwind v4 theme tokens (OKLCH). Extend with the design system in M2/M6. */
+@theme {
+  --color-brand-500: oklch(0.62 0.19 255);
+  --color-brand-600: oklch(0.55 0.20 255);
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
