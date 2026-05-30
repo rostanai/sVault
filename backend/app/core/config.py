@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     log_level: str = "INFO"
 
+    # Alert engine — the scheduler (pg_cron/Vercel Cron) calls the dispatch endpoint
+    # with this secret in the X-Cron-Secret header.
+    cron_secret: str = ""
+    # Channel credentials (empty = channel runs in "simulated" mode, logs intent only).
+    whatsapp_token: str = ""
+    sms_api_key: str = ""
+    telegram_bot_token: str = ""
+    email_api_key: str = ""
+
     @property
     def is_prod(self) -> bool:
         return self.env == "prod"

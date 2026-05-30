@@ -36,8 +36,26 @@
 - Require status checks to pass (`backend`, `frontend` CI jobs)
 - (optional) Require review
 
-## Scheduler (renewal alerts) — not a Vercel cron yet
-Serverless has no always-on worker. In M4 we wire the alert scan via **Supabase `pg_cron`** (or a **Vercel Cron** entry in `vercel.json`) hitting the dispatch endpoint. Tracked in BUILD_PLAN M4.
+## Scheduler (renewal alerts) — activate after backend deploy
+The engine (M4) exposes `POST /api/v1/alerts/dispatch`, guarded by the `X-Cron-Secret`
+header (`CRON_SECRET` env var). Serverless has no always-on worker, so trigger it daily.
+**Option A — Supabase `pg_cron` + `pg_net`** (recommended; both already enabled/available):
+```sql
+-- run once the backend is deployed and CRON_SECRET is set (use a strong secret)
+select cron.schedule(
+  'svault-daily-alert-scan',
+  '30 3 * * *',  -- 09:00 IST = 03:30 UTC
+  $$ select net.http_post(
+       url := 'https://<backend-project>.vercel.app/api/v1/alerts/dispatch',
+       headers := jsonb_build_object('X-Cron-Secret', '<CRON_SECRET>')
+     ); $$
+);
+```
+**Option B — Vercel Cron**: add to `vercel.json` a cron hitting the same endpoint with the header.
+The dispatch is idempotent (unique `policy,lead_day,channel`), so an occasional double-fire is safe.
+
+> Channels run in **simulated** mode until their credentials are set (WhatsApp BSP / SMS DLT
+> pending per `START_NOW.md`); `notification_log` records the intended sends meanwhile.
 
 ## Vercel MCP
 Added (`claude mcp add --transport http vercel https://mcp.vercel.com`). After a restart, run `/mcp` → **vercel** → Authenticate. Then deployments/status can be inspected from here (and the `vercel:*` skills are available).
