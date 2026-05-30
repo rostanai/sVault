@@ -433,6 +433,135 @@ class TestSubscribeNeverGrantsActiveStatus:
         )
 
 
+# ---------------------------------------------------------------------------
+# 9. Invoice download — invoice.paid webhook upsert + GET /billing/invoices auth
+# ---------------------------------------------------------------------------
+
+class TestInvoicePaidWebhook:
+    """invoice.paid webhook creates/updates an Invoice row with correct fields."""
+
+    @pytest.mark.asyncio
+    async def test_invoice_paid_creates_invoice_row(self):
+        """_upsert_invoice creates a new Invoice with correct amount, pdf_url, status."""
+        from decimal import Decimal
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.subscription_service import _upsert_invoice
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+        # Simulate no existing invoice found (create path).
+        no_row = MagicMock()
+        no_row.scalar_one_or_none = MagicMock(return_value=None)
+
+        created_invoices = []
+
+        def capture_add(obj):
+            created_invoices.append(obj)
+
+        db = AsyncMock()
+        db.add = MagicMock(side_effect=capture_add)
+        db.execute = AsyncMock(return_value=no_row)
+
+        inv_entity = {
+            "id": "inv_test_001",
+            "amount": 118000,        # 1180.00 INR in paise
+            "tax_amount": 18000,     # 180.00 INR GST in paise
+            "short_url": "https://rzp.io/i/test",
+            "payment_id": "pay_test_abc",
+            "issued_at": 1748649600,  # some epoch
+            "paid_at": 1748649700,
+        }
+
+        await _upsert_invoice(db, inv_entity, tenant_id)
+
+        assert len(created_invoices) == 1
+        inv = created_invoices[0]
+        assert inv.razorpay_invoice_id == "inv_test_001"
+        assert inv.amount_inr == Decimal("1180.00")
+        assert inv.gst_inr == Decimal("180.00")
+        assert inv.status == "paid"
+        assert inv.pdf_url == "https://rzp.io/i/test"
+        assert inv.razorpay_payment_id == "pay_test_abc"
+        assert inv.tenant_id == tenant_id
+        assert inv.paid_at is not None
+
+    @pytest.mark.asyncio
+    async def test_invoice_paid_updates_existing_row(self):
+        """_upsert_invoice updates in place when razorpay_invoice_id already exists."""
+        from decimal import Decimal
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.subscription_service import _upsert_invoice
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+        # Simulate an existing Invoice row (update path).
+        existing_inv = MagicMock()
+        existing_inv.razorpay_invoice_id = "inv_existing_001"
+
+        existing_row = MagicMock()
+        existing_row.scalar_one_or_none = MagicMock(return_value=existing_inv)
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute = AsyncMock(return_value=existing_row)
+
+        inv_entity = {
+            "id": "inv_existing_001",
+            "amount": 59000,
+            "tax_amount": 9000,
+            "short_url": "https://rzp.io/i/updated",
+            "payment_id": "pay_updated",
+            "issued_at": 1748649600,
+            "paid_at": 1748649800,
+        }
+
+        await _upsert_invoice(db, inv_entity, tenant_id)
+
+        # db.add must NOT be called — we updated in place.
+        db.add.assert_not_called()
+        assert existing_inv.amount_inr == Decimal("590.00")
+        assert existing_inv.gst_inr == Decimal("90.00")
+        assert existing_inv.status == "paid"
+        assert existing_inv.pdf_url == "https://rzp.io/i/updated"
+        assert existing_inv.razorpay_payment_id == "pay_updated"
+
+    @pytest.mark.asyncio
+    async def test_invoice_paid_no_tenant_skips(self):
+        """_upsert_invoice skips upsert if tenant_id cannot be resolved."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.subscription_service import _upsert_invoice
+
+        no_row = MagicMock()
+        no_row.scalar_one_or_none = MagicMock(return_value=None)
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute = AsyncMock(return_value=no_row)
+
+        inv_entity = {
+            "id": "inv_no_tenant_001",
+            "amount": 59000,
+            "tax_amount": 0,
+        }
+        # Pass tenant_id=None and no notes/subscription_id — should skip silently.
+        await _upsert_invoice(db, inv_entity, tenant_id=None)
+
+        db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_invoices_endpoint_requires_auth():
+    """GET /billing/invoices must return 401 without a bearer token."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/billing/invoices")
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "unauthorized"
+
+
 class TestPlatformAuditLog:
     """H1 + H2 fix: Super Admin mutations write platform_audit_log rows."""
 

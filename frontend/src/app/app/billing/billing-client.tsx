@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import {
+  getInvoices,
   getPlans,
   getSubscription,
+  type InvoiceRead,
   type PlanRead,
   type SubscriptionWithEntitlements,
 } from "@/lib/api";
@@ -15,10 +17,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Check, AlertTriangle, Zap } from "lucide-react";
+import { Check, AlertTriangle, Zap, Download, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
@@ -28,6 +38,7 @@ interface Props {
 export default function BillingClient({ token }: Props) {
   const [plans, setPlans] = useState<PlanRead[]>([]);
   const [subData, setSubData] = useState<SubscriptionWithEntitlements | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +55,10 @@ export default function BillingClient({ token }: Props) {
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
+    // Invoices load independently — a missing endpoint shouldn't break the page.
+    getInvoices(token)
+      .then(setInvoices)
+      .catch(() => setInvoices([]));
   }, [token]);
 
   if (loading) return <BillingSkeleton />;
@@ -155,6 +170,73 @@ export default function BillingClient({ token }: Props) {
               />
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Billing history */}
+      <div>
+        <h3 className="mb-4 text-base font-semibold">Billing History</h3>
+        {invoices.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+              <FileText className="mb-2 h-8 w-8 text-zinc-300" />
+              <p className="text-sm text-zinc-500">No invoices yet.</p>
+              <p className="text-xs text-zinc-400">
+                Invoices appear here after your first payment.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>GST</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Invoice</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invoices.map((inv) => (
+                  <TableRow key={inv.id}>
+                    <TableCell>{formatDate(inv.issued_at)}</TableCell>
+                    <TableCell className="font-medium">
+                      {formatINR(inv.amount_inr)}
+                    </TableCell>
+                    <TableCell className="text-zinc-500">
+                      {formatINR(inv.gst_inr)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={inv.status === "paid" ? "success" : "secondary"}
+                        className="capitalize"
+                      >
+                        {inv.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {inv.pdf_url ? (
+                        <Button asChild variant="outline" size="sm">
+                          <a
+                            href={inv.pdf_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Download className="mr-1.5 h-3.5 w-3.5" />
+                            Download
+                          </a>
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
         )}
       </div>
     </div>
