@@ -33,3 +33,15 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         raise RuntimeError("DATABASE_URL not configured")
     async with _SessionLocal() as session:
         yield session
+
+
+def db_configured() -> bool:
+    return _engine is not None
+
+
+async def ping_db() -> None:
+    """Open a connection and run `select 1` — used by the readiness check."""
+    if _engine is None:
+        raise RuntimeError("DATABASE_URL not configured")
+    async with _engine.connect() as conn:
+        await conn.exec_driver_sql("select 1")

@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.core.config import settings
+from app.db.session import db_configured, ping_db
 
 router = APIRouter(tags=["health"])
 
@@ -14,7 +15,14 @@ async def health() -> dict:
 
 @router.get("/ready")
 async def ready() -> dict:
-    """Readiness — dependencies reachable. DB check wired in M1 once the pool exists."""
+    """Readiness — pings the database via the transaction pooler."""
     checks = {"app": "ok"}
-    # TODO(M1): ping Supabase via the transaction pooler and set checks["db"].
-    return {"status": "ready", "checks": checks}
+    if not db_configured():
+        checks["db"] = "not_configured"
+        return {"status": "ready", "checks": checks}
+    try:
+        await ping_db()
+        checks["db"] = "ok"
+    except Exception:
+        checks["db"] = "error"
+    return {"status": "ready" if checks["db"] == "ok" else "degraded", "checks": checks}
