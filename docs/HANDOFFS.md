@@ -35,6 +35,19 @@
 - Contract updated: FEATURES, DECISIONS, TEAM, PERMISSIONS, PROJECT_BRIEF, CLAUDE.md; agents db/auth/api/billing/ui.
 - Open questions / decisions needed: Q5–Q12 in DECISIONS.md.
 
+### 2026-05-30 — project-setup/api/devops — M0 foundation scaffold (DONE, code)
+- Did: Scaffolded the monorepo and committed to branch `m0-foundation` (74 files).
+  **backend/**: FastAPI app factory, /health + /ready, config (pydantic-settings), structured JSON logging,
+  error envelope + ErrorCode taxonomy + global handlers + request-id middleware (per ERROR_HANDLING.md),
+  Vercel ASGI entrypoint (`api/index.py` + `vercel.json`), pyproject (3.12+, ruff, pytest). **Tests 3/3 green, ruff clean.**
+  **frontend/**: Next.js 16 App Router skeleton (React 19, Tailwind v4 OKLCH), error.tsx + not-found.tsx boundaries,
+  typed API client mapping the error envelope. **root**: .gitignore, README, GitHub Actions CI (backend ruff+pytest, frontend typecheck+build).
+- Verified locally: backend boots, pytest passes, ruff passes.
+- BLOCKED on user (external): (1) authenticate Supabase MCP (`claude /mcp`) → apply migrations 0001-0009;
+  (2) create Vercel projects + connect GitHub repo for auto-deploy; (3) push branch + open PR (awaiting user go-ahead to push).
+- Ready for: M1 (auth/org/RBAC) once DB is migrated. Restart Claude Code so the 12 agents register.
+- Contract updated: code under backend/ frontend/ .github/; README.
+
 ### 2026-05-30 — tech-lead — PRD + Build Plan
 - Did: Wrote `docs/PRD.md` (overview, goals/metrics, personas, scope, FR by epic with phase tags, NFRs, architecture, release phases, acceptance) and `docs/BUILD_PLAN.md` (milestones M0–M9, epics, agent owners, gates, dependency chain). MVP = M0 foundation → M1 auth/org/RBAC → M2 policies/docs → M3 dashboard → M4 alert engine (WhatsApp+Email) → M5 billing/trial/super-admin → M6 approvals+marketing+hardening → ship. Phase 1 = SMS/Telegram, AI RAG, search, group dashboards, dev API, OCR, onboarding. Linked in CLAUDE + TEAM doc map.
 - Ready for: user sign-off on plan; resolve Q5/Q6/Q10–Q12; authenticate Supabase MCP + restart → start M0.

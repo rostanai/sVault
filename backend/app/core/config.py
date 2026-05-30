@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""  # server-only; bypasses RLS
+    supabase_jwt_secret: str = ""  # verifies Supabase-issued JWTs (HS256)
+    jwt_algorithms: tuple[str, ...] = ("HS256",)
 
     # Timezone for all scheduling/expiry math (India default)
     timezone: str = "Asia/Kolkata"
