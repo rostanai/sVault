@@ -12,6 +12,9 @@ Route map:
   GET    /platform/tenants            list tenants
   POST   /platform/tenants/{id}/suspend
   POST   /platform/tenants/{id}/activate
+
+Audit logging: the CurrentUser (actor) is threaded into every mutating service call so
+platform_audit_log rows carry the super-admin's user_id (H1 + H2 DPDP fix).
 """
 from __future__ import annotations
 
@@ -39,6 +42,14 @@ router = APIRouter(prefix="/platform", tags=["platform"])
 _super = require_super_admin
 
 
+def _actor_id(user: CurrentUser) -> uuid.UUID | None:
+    """Convert user_id string to UUID for audit logging. Returns None on failure."""
+    try:
+        return uuid.UUID(user.user_id) if user.user_id else None
+    except ValueError:
+        return None
+
+
 @router.get("/plans", response_model=list[PlanRead])
 async def list_plans(
     _: CurrentUser = Depends(_super),
@@ -50,29 +61,29 @@ async def list_plans(
 @router.post("/plans", response_model=PlanRead, status_code=201)
 async def create_plan(
     payload: PlanCreate,
-    _: CurrentUser = Depends(_super),
+    user: CurrentUser = Depends(_super),
     db: AsyncSession = Depends(get_db),
 ) -> PlanRead:
-    return await platform_service.create_plan(db, payload)
+    return await platform_service.create_plan(db, payload, actor=_actor_id(user))
 
 
 @router.patch("/plans/{plan_id}", response_model=PlanRead)
 async def update_plan(
     plan_id: uuid.UUID,
     payload: PlanUpdate,
-    _: CurrentUser = Depends(_super),
+    user: CurrentUser = Depends(_super),
     db: AsyncSession = Depends(get_db),
 ) -> PlanRead:
-    return await platform_service.update_plan(db, plan_id, payload)
+    return await platform_service.update_plan(db, plan_id, payload, actor=_actor_id(user))
 
 
 @router.get("/settings/{key}", response_model=SettingRead)
 async def get_setting(
     key: str,
-    _: CurrentUser = Depends(_super),
+    user: CurrentUser = Depends(_super),
     db: AsyncSession = Depends(get_db),
 ) -> SettingRead:
-    result = await platform_service.get_setting(db, key)
+    result = await platform_service.get_setting(db, key, actor=_actor_id(user))
     return SettingRead(**result)
 
 
@@ -88,7 +99,7 @@ async def set_setting(
         key=key,
         value=payload.value,
         is_secret=payload.is_secret,
-        updated_by=uuid.UUID(user.user_id) if user.user_id else None,
+        updated_by=_actor_id(user),
     )
     return SettingRead(**result)
 
@@ -106,16 +117,16 @@ async def list_tenants(
 @router.post("/tenants/{tenant_id}/suspend", response_model=TenantRead)
 async def suspend_tenant(
     tenant_id: uuid.UUID,
-    _: CurrentUser = Depends(_super),
+    user: CurrentUser = Depends(_super),
     db: AsyncSession = Depends(get_db),
 ) -> TenantRead:
-    return await platform_service.suspend_tenant(db, tenant_id)
+    return await platform_service.suspend_tenant(db, tenant_id, actor=_actor_id(user))
 
 
 @router.post("/tenants/{tenant_id}/activate", response_model=TenantRead)
 async def activate_tenant(
     tenant_id: uuid.UUID,
-    _: CurrentUser = Depends(_super),
+    user: CurrentUser = Depends(_super),
     db: AsyncSession = Depends(get_db),
 ) -> TenantRead:
-    return await platform_service.activate_tenant(db, tenant_id)
+    return await platform_service.activate_tenant(db, tenant_id, actor=_actor_id(user))

@@ -153,3 +153,48 @@
 - Ready for: same open questions (Q5–Q12). Architecture now covers platform + tenant + org + billing + approvals + dev API.
 - Contract updated: FEATURES, PERMISSIONS, TEAM, DECISIONS, CLAUDE.md; agents auth/api/billing/devops/ui/security.
 - Open questions / decisions needed: Q5–Q12 in DECISIONS.md.
+
+### 2026-05-30 — billing-engineer — M5 security-auditor remediation (branch m5-billing)
+- Fixed all assigned findings from the security-auditor NO-GO review. Files changed:
+  `app/core/razorpay.py`, `app/api/v1/billing.py`, `app/services/subscription_service.py`,
+  `app/services/platform_service.py`, `app/api/v1/platform.py`,
+  `app/db/models/billing.py`, `app/db/models/__init__.py`, `tests/test_m5_billing.py`.
+- **C2 (Critical)**: `handle_webhook` now rejects events with no `event_id` immediately
+  (AppError validation_error, 400). Idempotency is now atomic: INSERT `billing_events` row
+  FIRST via `db.flush()` (triggers UNIQUE constraint), catch `IntegrityError` → `db.rollback()`
+  and return False WITHOUT applying any status change. Subscription lookup uses
+  `select(...).with_for_update()`. notes.tenant_id verified against subscription.tenant_id
+  (M2 fix included); mismatch logs warning, skips status update.
+- **M1 (Medium)**: `start_or_update_subscription` now persists `status="trialing"` for new
+  subscriptions (not `"active"`). Existing subscription status is preserved on updates.
+  Only `subscription.activated`/`subscription.charged` webhooks can set `"active"`.
+  Dev path logged at INFO; non-dev path (no razorpay_plan_id) logged at WARNING.
+- **H3 (High)**: `razorpay._post` and `._get` no longer put `exc.response.text` into
+  `AppError(details=...)`. The raw upstream body is logged server-side at WARNING only.
+  Client receives a static `f"Razorpay error {status_code}"` message.
+- **H1 + H2 (High)**: Added `PlatformAuditLog` ORM model (mirrors `platform_audit_log`
+  table from migration 0002). Added `_audit()` helper in `platform_service.py`. Every
+  Super Admin mutation now writes an audit row: plan create/update (action="create"/"update",
+  target=plan_id), tenant suspend/activate (action="update", target=tenant_id), setting
+  create/update (action="create"/"update", target=key — never the secret value), secret
+  read (action="export", target=key). Actor (super-admin user_id) is threaded from
+  endpoints through all service calls. `platform.py` updated with `_actor_id()` helper.
+- **Low (M4)**: Webhook signature failures now use `ErrorCode.validation_error` (not
+  `unauthorized`) in `_check_webhook_signature`.
+- **Tests**: Added 6 new tests in `TestWebhookIdempotency`, `TestSubscribeNeverGrantsActiveStatus`,
+  `TestPlatformAuditLog` covering: id-less event rejection, duplicate event_id non-reprocess,
+  trialing status (not active) on subscribe without payment, audit logging for plan create,
+  setting write, and tenant suspend. Updated signature-failure assertions to match new code.
+- **Not addressed (requires other agents)**: C1 (RLS fix — already done by db-architect
+  via migration 0012), M3 (secrets_store bare Exception catch — pre-existing, low priority).
+- ruff/pytest status: Unable to run (bash permissions not available in this session).
+  All changes manually verified for ruff compliance (E/F/I/UP/B rules, line-length 100).
+
+### 2026-05-30 — security-auditor — M5 billing slice review (branch m5-billing)
+- Reviewed: razorpay.py, secrets_store.py, entitlements.py, subscription_service.py, platform_service.py, billing.py, platform.py, billing model, config.py, security.py, session.py, 0003/0008 migrations.
+- Verdict: **NO-GO for merge.** 2 Critical, 3 High, 4 Medium findings.
+- Critical: (C1) RLS `subscriptions_tenant_write`/`*_tenant_write` grant tenant admin/manager direct INSERT/UPDATE on subscriptions+invoices — a tenant could self-upgrade plan_id if any path reaches DB with their JWT (defense-in-depth hole; FastAPI currently connects via service role so app layer is the only gate). Restrict billing-table writes to super_admin/service-role only. (C2) Webhook handler is NOT atomic-idempotent against the status mutation: subscription status is updated and the billing_events dedupe row is inserted in the same commit, but the duplicate-check is a separate SELECT — under Razorpay retries a duplicate can re-apply a stale status (e.g. re-downgrade after a newer event) before the IntegrityError fires; also handler ignores event_id=None (events with no id bypass idempotency entirely).
+- High: (H1) Plan create/update + subscribe perform NO platform_audit_log write — PERMISSIONS requires all secret/plan/tenant actions audit-logged (DPDP 1-yr). (H2) Secret access/rotation not audit-logged in set_setting/get_setting. (H3) `razorpay._post`/`_get` put `exc.response.text` into AppError.details (upstream_error) — Razorpay error bodies can echo request data; risk of leaking to client envelope per ERROR_HANDLING (never leak upstream internals).
+- Medium: (M1) `start_or_update_subscription` silently persists local sub as 'active' when Razorpay call fails or keys absent — grants paid entitlements with no payment. (M2) Webhook does not verify the event's subscription belongs to the tenant in notes; trusts rzp_sub_id match only (acceptable but log tenant). (M3) `secrets_store._fernet` catches bare `Exception` masking real errors. (M4) `verify_webhook_signature` compares hex digests with compare_digest (good) but raises generic — OK; however signature uses `unauthorized` code with http_status=400 mismatch (cosmetic).
+- Good: signature verified before get_db (dep ordering correct), constant-time compare used, Fernet refuses plaintext when key missing, secrets masked on GET, JWT alg pinned HS256 (no alg=none), claims from app_metadata not user_metadata, Decimal/Numeric for money, no hardcoded secrets, .env/.claude.json gitignored, /platform/* all require_super_admin returning 404.
+- Owner to fix: billing-engineer (C2,M1,H3) + db-architect (C1) + api-engineer (H1,H2 audit hook). Re-review required before merge.

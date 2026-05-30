@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 
 import httpx
 
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
+
+log = logging.getLogger("svault.razorpay")
 
 _BASE = "https://api.razorpay.com/v1"
 _TIMEOUT = 10.0
@@ -40,10 +43,14 @@ async def _post(path: str, body: dict) -> dict:
     except httpx.TimeoutException as exc:
         raise AppError(ErrorCode.upstream_error, "Razorpay request timed out") from exc
     except httpx.HTTPStatusError as exc:
+        # Log the raw upstream body server-side only — never expose in the client envelope.
+        log.warning(
+            "razorpay_http_error path=%s status=%s body=%s",
+            path, exc.response.status_code, exc.response.text,
+        )
         raise AppError(
             ErrorCode.upstream_error,
             f"Razorpay error {exc.response.status_code}",
-            details=exc.response.text,
         ) from exc
     except httpx.RequestError as exc:
         raise AppError(ErrorCode.upstream_error, "Razorpay request failed") from exc
@@ -59,10 +66,14 @@ async def _get(path: str) -> dict:
     except httpx.TimeoutException as exc:
         raise AppError(ErrorCode.upstream_error, "Razorpay request timed out") from exc
     except httpx.HTTPStatusError as exc:
+        # Log the raw upstream body server-side only — never expose in the client envelope.
+        log.warning(
+            "razorpay_http_error path=%s status=%s body=%s",
+            path, exc.response.status_code, exc.response.text,
+        )
         raise AppError(
             ErrorCode.upstream_error,
             f"Razorpay error {exc.response.status_code}",
-            details=exc.response.text,
         ) from exc
     except httpx.RequestError as exc:
         raise AppError(ErrorCode.upstream_error, "Razorpay request failed") from exc

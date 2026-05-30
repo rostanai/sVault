@@ -1,6 +1,7 @@
-"""Billing ORM models (M5): Plan, Subscription, Invoice, BillingEvent, PlatformSetting.
+"""Billing ORM models (M5): Plan, Subscription, Invoice, BillingEvent, PlatformSetting,
+PlatformAuditLog.
 
-Mirrors 0002_platform_tenancy.sql (plans, platform_settings) and
+Mirrors 0002_platform_tenancy.sql (plans, platform_settings, platform_audit_log) and
 0003_billing.sql (subscriptions, invoices, billing_events).
 The DB owns DDL (enums/triggers/RLS); ENUM(create_type=False) throughout.
 """
@@ -10,7 +11,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +26,12 @@ plan_tier_enum = ENUM(
 subscription_status_enum = ENUM(
     "trialing", "active", "past_due", "paused", "cancelled", "expired",
     name="subscription_status", create_type=False,
+)
+
+audit_action_enum = ENUM(
+    "create", "update", "delete", "login", "logout",
+    "approve", "reject", "export", "impersonate",
+    name="audit_action", create_type=False,
 )
 
 
@@ -124,5 +131,26 @@ class BillingEvent(Base, UUIDPK):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
     received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default="now()"
+    )
+
+
+class PlatformAuditLog(Base):
+    """Platform-plane audit log — DPDP 1-yr retention (mirrors platform_audit_log table).
+
+    Written by platform_service for every Super Admin mutation:
+    plan create/update, tenant suspend/activate, setting create/update/rotate.
+    actor is the super-admin auth.users id; target is the object id / key (never a secret
+    value); detail is a small jsonb with context (field names changed, not values).
+    """
+
+    __tablename__ = "platform_audit_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    actor: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    action: Mapped[str] = mapped_column(audit_action_enum, nullable=False)
+    target: Mapped[str | None] = mapped_column(Text)  # e.g. plan_id, tenant_id, setting key
+    detail: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default="now()"
     )

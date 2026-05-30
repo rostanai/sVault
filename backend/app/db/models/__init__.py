@@ -13,6 +13,7 @@ from app.db.models.billing import (  # noqa: F401
     BillingEvent,
     Invoice,
     Plan,
+    PlatformAuditLog,
     PlatformSetting,
     Subscription,
 )
@@ -30,7 +31,7 @@ from app.db.models.tenancy import (  # noqa: F401
 
 __all__ = [
     "Tenant", "Organization", "Profile", "Invitation",
-    "Plan", "Subscription", "Invoice", "BillingEvent", "PlatformSetting",
+    "Plan", "Subscription", "Invoice", "BillingEvent", "PlatformSetting", "PlatformAuditLog",
     "Provider", "Policy", "PolicyDocument",
     "AlertRule", "Alert", "NotificationLog",
 ]

@@ -62,13 +62,13 @@ async def _check_webhook_signature(
 
     if not x_razorpay_signature:
         raise AppError(
-            ErrorCode.unauthorized,
+            ErrorCode.validation_error,
             "Missing webhook signature",
             http_status=400,
         )
     if not verify_webhook_signature(raw_body, x_razorpay_signature):
         raise AppError(
-            ErrorCode.unauthorized,
+            ErrorCode.validation_error,
             "Webhook signature verification failed",
             http_status=400,
         )

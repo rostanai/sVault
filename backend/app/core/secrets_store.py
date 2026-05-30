@@ -9,6 +9,8 @@ Generate a key once:
 """
 from __future__ import annotations
 
+import binascii
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import settings
@@ -21,7 +23,7 @@ def _fernet() -> Fernet:
         raise AppError(ErrorCode.internal_error, "Secrets encryption key not configured")
     try:
         return Fernet(key.encode() if isinstance(key, str) else key)
-    except (ValueError, Exception) as exc:
+    except (ValueError, TypeError, binascii.Error) as exc:
         raise AppError(ErrorCode.internal_error, "Invalid secrets encryption key") from exc
 
 
