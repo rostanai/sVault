@@ -88,6 +88,23 @@ class SubscribeResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Invoices
+# ---------------------------------------------------------------------------
+
+class InvoiceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    amount_inr: Decimal
+    gst_inr: Decimal
+    status: str
+    issued_at: datetime
+    paid_at: datetime | None
+    pdf_url: str | None
+    razorpay_invoice_id: str | None
+
+
+# ---------------------------------------------------------------------------
 # Platform settings
 # ---------------------------------------------------------------------------
 

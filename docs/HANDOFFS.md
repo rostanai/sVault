@@ -251,6 +251,25 @@
   - `frontend/src/app/(app)/` — layout, dashboard, policies, billing, alerts, settings
 - Contract updated: `docs/HANDOFFS.md`; `frontend/` codebase.
 
+### 2026-05-31 — billing-engineer — invoice download support (branch invoice-download)
+
+- Did: Added invoice download support to the billing backend slice. No DB migration needed — the `invoices` table already exists from migration 0003.
+  - **`InvoiceRead` schema** (`app/schemas/billing.py`): new Pydantic model with `from_attributes=True`; fields exactly: `id`, `amount_inr`, `gst_inr`, `status`, `issued_at`, `paid_at | None`, `pdf_url | None`, `razorpay_invoice_id | None`.
+  - **`list_invoices(db, tenant_id)` helper** (`app/services/subscription_service.py`): SELECT invoices WHERE tenant_id = tid ORDER BY issued_at DESC.
+  - **`_upsert_invoice(db, inv_entity, tenant_id)` helper** (`app/services/subscription_service.py`): idempotent upsert on `razorpay_invoice_id`. Paise-to-INR division via `Decimal`. Tenant resolution: (1) passed-in tenant_id from subscription lookup, (2) `notes.tenant_id`, (3) subscription lookup by `subscription_id`. If unresolvable, logs warning and skips (no crash). Update-in-place if `razorpay_invoice_id` already exists.
+  - **`_epoch_to_dt(ts, fallback_now)` helper** (`app/services/subscription_service.py`): epoch seconds → aware UTC datetime; fallback=now for `issued_at`, None for `paid_at`.
+  - **`invoice.paid` dispatch** (`handle_webhook` in `subscription_service.py`): after the subscription status block, dispatches to `_upsert_invoice` with the resolved `tenant_id` and `payload["payload"]["invoice"]["entity"]`. Existing idempotency guard (billing_events dedup) intact.
+  - **`GET /billing/invoices`** (`app/api/v1/billing.py`): requires auth (same `_authed` dep as `/billing/subscription`), returns `list[InvoiceRead]` for the tenant, ordered by `issued_at` desc.
+  - **Tests** (`tests/test_m5_billing.py`, section 9): `TestInvoicePaidWebhook` — (a) create-path asserts amount/GST/pdf_url/status/paid_at on Invoice; (b) update-path asserts in-place mutation and no duplicate db.add; (c) no-tenant path asserts db.add not called. Standalone `test_list_invoices_endpoint_requires_auth` asserts 401 without token.
+- Files changed:
+  - `app/schemas/billing.py` — added `InvoiceRead`
+  - `app/services/subscription_service.py` — added `list_invoices`, `_upsert_invoice`, `_epoch_to_dt`; added `invoice.paid` dispatch in `handle_webhook`; added `Invoice` to imports; added `datetime`, `timezone`, `Decimal` imports
+  - `app/api/v1/billing.py` — added `GET /billing/invoices` endpoint; imported `InvoiceRead`
+  - `tests/test_m5_billing.py` — added section 9 (4 new tests)
+- Endpoint: `GET /api/v1/billing/invoices` — authenticated tenant user, returns `list[InvoiceRead]`
+- Webhook event handled: `invoice.paid` (upsert via `_upsert_invoice`)
+- ruff/pytest: verified manually; all changes comply with `line-length = 100`, `select = ["E","F","I","UP","B"]`. No live run (Bash restricted in this session).
+
 ### 2026-05-30 — ui-ux-designer — routing fix + marketing landing page (branch frontend-app)
 
 - Did: Two-part task: (1) routing collision fix; (2) full marketing website at `/`.

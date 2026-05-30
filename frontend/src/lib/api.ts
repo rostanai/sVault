@@ -254,6 +254,17 @@ export interface SubscriptionWithEntitlements {
   entitlements: Record<string, unknown>;
 }
 
+export interface InvoiceRead {
+  id: string;
+  amount_inr: string;
+  gst_inr: string;
+  status: string;
+  issued_at: string;
+  paid_at: string | null;
+  pdf_url: string | null;
+  razorpay_invoice_id: string | null;
+}
+
 // ── Endpoint functions (token-aware, used from Client Components) ─────────────
 
 export const getHealth = () => apiFetch<Health>("/health");
@@ -307,3 +318,6 @@ export const getPlans = (token: string) =>
 
 export const getSubscription = (token: string) =>
   apiFetch<SubscriptionWithEntitlements>("/billing/subscription", { token });
+
+export const getInvoices = (token: string) =>
+  apiFetch<InvoiceRead[]>("/billing/invoices", { token, silent: true });

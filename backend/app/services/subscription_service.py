@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -32,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import razorpay as rzp
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode, not_found
-from app.db.models.billing import BillingEvent, Plan, Subscription
+from app.db.models.billing import BillingEvent, Invoice, Plan, Subscription
 
 log = logging.getLogger("svault.subscription")
 
@@ -47,6 +49,17 @@ async def get_current(db: AsyncSession, tenant_id: str | uuid.UUID) -> Subscript
 async def list_active_plans(db: AsyncSession) -> list[Plan]:
     """All active plans ordered by price."""
     stmt = select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.price_inr.asc())
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def list_invoices(db: AsyncSession, tenant_id: str | uuid.UUID) -> list[Invoice]:
+    """Return all invoices for a tenant ordered by issued_at desc."""
+    tid = uuid.UUID(str(tenant_id))
+    stmt = (
+        select(Invoice)
+        .where(Invoice.tenant_id == tid)
+        .order_by(Invoice.issued_at.desc())
+    )
     return list((await db.execute(stmt)).scalars().all())
 
 
@@ -274,9 +287,139 @@ async def handle_webhook(db: AsyncSession, event_type: str, payload: dict) -> bo
                     event_id, rzp_sub_id, new_status, tenant_id,
                 )
 
+    # --- invoice.paid: upsert an Invoice row ---
+    if event_type == "invoice.paid":
+        inv_entity: dict = payload.get("payload", {}).get("invoice", {}).get("entity", {})
+        await _upsert_invoice(db, inv_entity, tenant_id)
+
     # Update the billing event with resolved tenant_id and mark processed.
     event_row.tenant_id = tenant_id
     event_row.processed = True
 
     await db.commit()
     return True
+
+
+def _epoch_to_dt(ts: int | None, fallback_now: bool = True) -> datetime | None:
+    """Convert a Unix epoch (seconds) to an aware UTC datetime.
+
+    Returns now() if ts is None and fallback_now is True, otherwise None.
+    """
+    if ts is not None:
+        return datetime.fromtimestamp(int(ts), tz=UTC)
+    if fallback_now:
+        return datetime.now(tz=UTC)
+    return None
+
+
+async def _upsert_invoice(
+    db: AsyncSession,
+    inv_entity: dict,
+    tenant_id: uuid.UUID | None,
+) -> None:
+    """Upsert an Invoice row from a Razorpay invoice.paid entity dict.
+
+    Tenant resolution order:
+    1. The tenant_id already resolved from the Subscription lookup (passed in).
+    2. inv_entity["notes"]["tenant_id"] — set by the subscribe flow.
+    3. Look up Subscription by inv_entity["subscription_id"].
+    If none resolve, log a warning and skip.
+    """
+    rzp_invoice_id: str | None = inv_entity.get("id")
+    if not rzp_invoice_id:
+        log.warning("invoice_paid_entity_missing_id — skipping upsert")
+        return
+
+    # Resolve tenant_id if not yet known from the subscription webhook path.
+    if tenant_id is None:
+        notes_tid = (inv_entity.get("notes") or {}).get("tenant_id")
+        if notes_tid:
+            try:
+                tenant_id = uuid.UUID(str(notes_tid))
+            except ValueError:
+                log.warning(
+                    "invoice_paid_invalid_notes_tenant_id rzp_invoice=%s notes_tid=%s",
+                    rzp_invoice_id, notes_tid,
+                )
+
+    if tenant_id is None:
+        rzp_sub_id_on_inv: str | None = inv_entity.get("subscription_id")
+        if rzp_sub_id_on_inv:
+            sub_row: Subscription | None = (
+                await db.execute(
+                    select(Subscription).where(
+                        Subscription.razorpay_subscription_id == rzp_sub_id_on_inv
+                    )
+                )
+            ).scalar_one_or_none()
+            if sub_row is not None:
+                tenant_id = sub_row.tenant_id
+
+    if tenant_id is None:
+        log.warning(
+            "invoice_paid_no_tenant_id rzp_invoice=%s — skipping upsert",
+            rzp_invoice_id,
+        )
+        return
+
+    # Resolve the local subscription FK (optional — may be None).
+    local_sub_id: uuid.UUID | None = None
+    rzp_sub_on_inv: str | None = inv_entity.get("subscription_id")
+    if rzp_sub_on_inv:
+        sub_local: Subscription | None = (
+            await db.execute(
+                select(Subscription).where(
+                    Subscription.razorpay_subscription_id == rzp_sub_on_inv
+                )
+            )
+        ).scalar_one_or_none()
+        if sub_local is not None:
+            local_sub_id = sub_local.id
+
+    amount_inr = Decimal(str(inv_entity.get("amount", 0))) / 100
+    gst_inr = Decimal(str(inv_entity.get("tax_amount", 0))) / 100
+    pdf_url: str | None = inv_entity.get("short_url")
+    razorpay_payment_id: str | None = inv_entity.get("payment_id")
+    issued_at: datetime = (
+        _epoch_to_dt(inv_entity.get("issued_at")) or datetime.now(tz=UTC)
+    )
+    paid_at: datetime | None = _epoch_to_dt(inv_entity.get("paid_at"), fallback_now=False)
+
+    # Idempotent upsert: find existing row by razorpay_invoice_id.
+    existing: Invoice | None = (
+        await db.execute(
+            select(Invoice).where(Invoice.razorpay_invoice_id == rzp_invoice_id)
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        # Update in place — do NOT create a duplicate.
+        existing.amount_inr = amount_inr
+        existing.gst_inr = gst_inr
+        existing.status = "paid"
+        existing.pdf_url = pdf_url
+        existing.razorpay_payment_id = razorpay_payment_id
+        existing.issued_at = issued_at
+        existing.paid_at = paid_at
+        log.info(
+            "invoice_upsert_updated rzp_invoice=%s tenant_id=%s",
+            rzp_invoice_id, tenant_id,
+        )
+    else:
+        invoice = Invoice(
+            tenant_id=tenant_id,
+            subscription_id=local_sub_id,
+            amount_inr=amount_inr,
+            gst_inr=gst_inr,
+            status="paid",
+            razorpay_invoice_id=rzp_invoice_id,
+            razorpay_payment_id=razorpay_payment_id,
+            issued_at=issued_at,
+            paid_at=paid_at,
+            pdf_url=pdf_url,
+        )
+        db.add(invoice)
+        log.info(
+            "invoice_upsert_created rzp_invoice=%s tenant_id=%s",
+            rzp_invoice_id, tenant_id,
+        )

@@ -1,8 +1,9 @@
-"""Billing endpoints (M5) — plans, subscriptions, Razorpay webhook.
+"""Billing endpoints (M5) — plans, subscriptions, invoices, Razorpay webhook.
 
 Route map:
   GET  /plans                     any authed user — active plan list + prices
   GET  /billing/subscription      any authed user — tenant's subscription + entitlements
+  GET  /billing/invoices          any authed user — tenant's invoices (issued_at desc)
   POST /billing/subscribe         billing:manage — start/upgrade Razorpay subscription
   POST /billing/webhook           NO user auth  — Razorpay webhook (sig-verified, idempotent)
 
@@ -25,6 +26,7 @@ from app.core.razorpay import verify_webhook_signature
 from app.core.security import CurrentUser
 from app.db.session import get_db
 from app.schemas.billing import (
+    InvoiceRead,
     PlanRead,
     SubscribeRequest,
     SubscribeResponse,
@@ -106,6 +108,17 @@ async def get_subscription(
         subscription=SubscriptionRead.model_validate(sub) if sub else None,
         entitlements=ents,
     )
+
+
+@router.get("/billing/invoices", response_model=list[InvoiceRead])
+async def list_invoices(
+    user: CurrentUser = Depends(_authed),
+    db: AsyncSession = Depends(get_db),
+) -> list[InvoiceRead]:
+    """Return the tenant's invoices ordered by issued_at desc (any authenticated user)."""
+    if not user.tenant_id:
+        raise AppError(ErrorCode.unauthorized, "No tenant context")
+    return await subscription_service.list_invoices(db, user.tenant_id)
 
 
 @router.post("/billing/subscribe", response_model=SubscribeResponse)
