@@ -1,9 +1,35 @@
 @import "tailwindcss";
 
-/* Tailwind v4 theme tokens (OKLCH). Extend with the design system in M2/M6. */
+/* Tailwind v4 theme tokens (OKLCH). */
 @theme {
+  /* Brand accent — indigo/blue */
+  --color-brand-50:  oklch(0.97 0.03 255);
+  --color-brand-100: oklch(0.93 0.06 255);
+  --color-brand-200: oklch(0.87 0.10 255);
+  --color-brand-300: oklch(0.79 0.14 255);
+  --color-brand-400: oklch(0.71 0.17 255);
   --color-brand-500: oklch(0.62 0.19 255);
   --color-brand-600: oklch(0.55 0.20 255);
+  --color-brand-700: oklch(0.47 0.20 255);
+  --color-brand-800: oklch(0.40 0.18 255);
+  --color-brand-900: oklch(0.33 0.15 255);
+
+  /* Focus ring */
+  --color-ring: oklch(0.62 0.19 255);
+
+  /* Accordion animations */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from { height: 0; }
+    to { height: var(--radix-accordion-content-height); }
+  }
+
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height); }
+    to { height: 0; }
+  }
 }
 
 :root {
