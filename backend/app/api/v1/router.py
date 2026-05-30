@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     alerts,
     auth,
+    dashboard,
     documents,
     health,
     invitations,
@@ -21,6 +22,7 @@ api_router.include_router(policies.router)      # M2
 api_router.include_router(providers.router)     # M2
 api_router.include_router(documents.router)     # M2
 api_router.include_router(alerts.router)         # M4
+api_router.include_router(dashboard.router)      # M3
 
 # Later milestones add routers here:
-#   M3 dashboard · M4 alerts · M5 billing/platform · M6 approvals
+#   M5 billing/platform · M6 approvals

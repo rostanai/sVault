@@ -35,6 +35,10 @@
 - Contract updated: FEATURES, DECISIONS, TEAM, PERMISSIONS, PROJECT_BRIEF, CLAUDE.md; agents db/auth/api/billing/ui.
 - Open questions / decisions needed: Q5–Q12 in DECISIONS.md.
 
+### 2026-05-30 — notifications/api — M4 renewal alert engine (PR #3)
+- Did: Built the alert engine on branch m4-alerts (PR #3, base m2-policies). Models AlertRule/Alert/NotificationLog; `alert_engine.py` (IST-correct due-day math, rule resolution per-policy→tenant→default 60/30/15/7/1 + whatsapp/email, idempotent scan_and_dispatch via unique policy/lead_day/channel, acknowledge); `notifier.py` (pluggable channels, simulated mode until creds); endpoints GET|PUT /policies/{id}/alert-rule, GET /alerts, POST /alerts/{id}/ack, POST /alerts/dispatch (cron-secret guarded → 404 without). pg_cron activation documented in DEPLOYMENT.md. 48 tests green, ruff clean.
+- Pending: real channel senders (WhatsApp BSP/SMS DLT — START_NOW), activate pg_cron after backend deploy, live integration test (needs DATABASE_URL).
+
 ### 2026-05-30 — db/api/devops — DB LIVE + M2 policies + isolation PROVEN
 - Did: Authenticated Supabase (plugin MCP). Applied all migrations 0001-0010 to project hgopttbpoyvmlzgzyzio — **21 tables, RLS on all**, enums/functions/triggers/indexes (HNSW+trgm)/realtime publication. Security advisor 18→4 WARN (only low-risk extension_in_public left). Added **Vercel MCP** + `docs/DEPLOYMENT.md` (two-project GitHub auto-deploy). Built **M2 policy/provider CRUD** (models, service with tenant/org scoping + ownership, endpoints) → branch m2-policies, **PR #2** (base m1-auth-org), 34 tests green.
 - **VERIFIED (M1/M2 gate):** ran live RLS test — a Tenant-A admin sees only Tenant-A's policy, not Tenant-B's (cross-tenant isolation confirmed at the DB layer; test rolled back).
