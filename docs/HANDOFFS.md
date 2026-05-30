@@ -211,3 +211,90 @@
 - M3: secrets_store narrowed to (ValueError, TypeError, binascii.Error) / InvalidToken.
 - New (informational, non-blocking): tenant-mismatch webhook path consumes the event_id (processed=False) so a later legit retry of the SAME id is dropped — acceptable anti-replay behavior. The 0008 generic loop still grants tenant admin/manager write on billing_events/api_keys/webhooks/audit_log — out of C1 scope but recommend a follow-up hardening ticket (esp. audit_log tamper-resistance).
 - Could NOT execute `ruff check` / `pytest -q` in this session (sandbox blocked the venv binaries). test_m5_billing.py contains targeted coverage for every fix (idempotency, never-active, audit calls, sig 400). Tech-lead/CI should confirm 87 tests still green before merge.
+
+### 2026-05-30 — ui-ux-designer — M3 core authenticated frontend (branch frontend-app)
+
+- Did: Built the complete authenticated frontend for sVault on branch `frontend-app`.
+  - **Dependencies installed**: `@supabase/supabase-js`, `@supabase/ssr`, `sonner`, `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-avatar`, `@radix-ui/react-select`, `@radix-ui/react-label`, `@radix-ui/react-slot`, `lucide-react`, `class-variance-authority`, `clsx`, `tailwind-merge`.
+  - **Supabase SSR auth**: `src/lib/supabase/client.ts` (browser, `createBrowserClient`) + `src/lib/supabase/server.ts` (server, cookies-based). All Supabase client instantiation is lazy (inside async event handlers or dynamic imports) to avoid build-time failures when env vars are absent.
+  - **Proxy (Next.js 16 middleware)**: `src/proxy.ts` — session refresh on every request, protects `/app/*` (redirects to `/login`), redirects authenticated users away from `/login`.
+  - **Auth callback**: `src/app/auth/callback/route.ts` — exchanges OAuth code for session, calls `GET /auth/me`, routes to `/onboarding` if no `tenant_id`, else `/app`.
+  - **Typed API client**: `src/lib/api.ts` — injects `Authorization: Bearer <token>`, maps the backend error envelope `{error:{code,message,details,request_id}}` to `AppError`, shows `sonner` toast with `request_id` on failure. All endpoint functions typed from backend Pydantic schemas.
+  - **Utility helpers**: `src/lib/utils.ts` — `cn()`, INR formatter (`en-IN`/`INR`), `formatDate`, `daysLeftVariant` (red <7d, amber <30d, green otherwise), `categorylabel`, `statusLabel`.
+  - **shadcn/ui components** (new-york style, Tailwind v4 compatible, `data-slot` attrs): Button, Badge (with `warning`/`success`/`destructive` variants), Card, Input, Label, Skeleton, Dialog, Select, Avatar, DropdownMenu, Table — all at `src/components/ui/`.
+  - **Screens built**:
+    1. `/login` — Google OAuth (SVG logo, `signInWithOAuth`) + email/password sign-in/sign-up. Centered card, sVault branding. `useSearchParams` wrapped in `<Suspense>` for SSG compatibility.
+    2. `/onboarding` — company name + full name form → `POST /auth/onboard` → `refreshSession()` → `/app`.
+    3. `/(app)` layout (`src/app/(app)/layout.tsx`) — Server Component, reads Supabase session, redirects unauthenticated, passes user email/name/avatar to `AppShell`.
+    4. `AppShell` (`src/components/app-shell.tsx`) — responsive sidebar (Desktop: 60-col fixed; Mobile: slide-over overlay with backdrop), topbar with user `Avatar` + `DropdownMenu` (Settings, Sign out). Nav: Dashboard, Policies, Alerts, Billing, Settings. Active state highlighted with `bg-brand-600`.
+    5. `/app` dashboard (`src/app/(app)/page.tsx` + `dashboard-client.tsx`) — 4 stat cards (total policies, sum insured ₹, premium ₹, lapsed), 3 expiring-soon cards (30/60/90d), category breakdown, upcoming renewals table (title, category, expiry, days-left badge). Loading skeletons, empty state, error state.
+    6. `/app/policies` (`policies/page.tsx` + `policies-client.tsx`) — table with title/category/status badge/expiry/sum insured/premium, category + status filters, search, "Add Policy" dialog (org select + full form → `POST /policies`). Row click → detail. Loading/empty/error states.
+    7. `/app/policies/[id]` — policy detail (all fields in `<dl>`, days-left badge, status badge). Document + alert stubs.
+    8. `/app/billing` — `GET /plans` as plan cards (price, entitlements list, upgrade CTA), current subscription status + trial banner (Razorpay checkout stubbed with `toast.info`).
+    9. `/app/alerts` + `/app/settings` — stub pages (coming in future milestones).
+    10. `/(app)/error.tsx` — route-level error boundary with retry button.
+  - **Globals.css**: Extended `@theme` with brand-50 through brand-900 OKLCH tokens + `--color-ring`.
+  - **next.config.ts**: Added `turbopack.root` to silence workspace lockfile warning.
+  - **`npm run typecheck`**: PASS (zero errors).
+  - **`npm run build`**: PASS — 10 routes, no errors, no warnings.
+- Stubs / pending: Razorpay inline checkout (billing page has placeholder toast), document upload (policy detail stub), alert configuration UI (M4), real `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` env vars required at runtime.
+- Component paths:
+  - `frontend/src/lib/api.ts` — typed API client
+  - `frontend/src/lib/utils.ts` — INR/date/badge helpers
+  - `frontend/src/lib/supabase/client.ts` + `server.ts`
+  - `frontend/src/proxy.ts` — Next.js 16 proxy (session guard)
+  - `frontend/src/components/app-shell.tsx` — sidebar + topbar
+  - `frontend/src/components/ui/` — Button, Badge, Card, Input, Label, Skeleton, Dialog, Select, Avatar, DropdownMenu, Table
+  - `frontend/src/app/login/` — login page + form component
+  - `frontend/src/app/auth/callback/route.ts`
+  - `frontend/src/app/onboarding/page.tsx`
+  - `frontend/src/app/(app)/` — layout, dashboard, policies, billing, alerts, settings
+- Contract updated: `docs/HANDOFFS.md`; `frontend/` codebase.
+
+### 2026-05-30 — ui-ux-designer — routing fix + marketing landing page (branch frontend-app)
+
+- Did: Two-part task: (1) routing collision fix; (2) full marketing website at `/`.
+
+  **Part 1 — Routing fix:**
+  - Created `frontend/src/app/app/` as a real path segment (not a route group) so authenticated app routes now live at `/app`, `/app/policies`, `/app/policies/[id]`, `/app/billing`, `/app/alerts`, `/app/settings`.
+  - Copied all app route files to `src/app/app/`: `layout.tsx`, `error.tsx`, `page.tsx` (dashboard), `dashboard-client.tsx`, `alerts/page.tsx`, `settings/page.tsx`, `billing/page.tsx`, `billing/billing-client.tsx`, `policies/page.tsx`, `policies/policies-client.tsx`, `policies/[id]/page.tsx`, `policies/[id]/policy-detail-client.tsx`.
+  - `src/proxy.ts` was already correct (`/app/*` guard); no changes needed.
+  - `src/components/app-shell.tsx` nav links were already `/app/*`; no changes needed.
+  - Gutted old `src/app/(app)/` route group: replaced all pages with minimal `redirect("/app/...")` stubs and made `layout.tsx` a passthrough, eliminating the auth collision at `/` and cleaning up the `/policies`, `/billing`, `/alerts`, `/settings` legacy URLs (now `○` static redirects).
+
+  **Part 2 — Marketing landing page:**
+  - Rewrote `src/app/page.tsx` as a Server Component (SSG `○`) importing 9 marketing section components.
+  - Created `src/components/marketing/` with: `logo.tsx` (SVG shield + wordmark), `navbar.tsx` (sticky, responsive, mobile slide-down), `hero.tsx` (gradient, outcome headline, dual CTA, trust strip), `problem.tsx` (Excel pain grid), `features.tsx` (6-card grid), `how-it-works.tsx` (3-step), `alerts-highlight.tsx` (cadence timeline + channel cards), `security.tsx` (6 DPDP/encryption badges), `pricing.tsx` (4-tier cards with INR + highlight), `faq.tsx` (shadcn Accordion), `final-cta.tsx` (brand-600 band), `footer.tsx` (4-col + legal links).
+  - Added `@radix-ui/react-accordion` dep + `src/components/ui/accordion.tsx` (shadcn new-york style).
+  - Added accordion keyframe animations (`accordion-down`/`accordion-up`) to `src/app/globals.css` via `@theme`.
+  - Created stub legal pages (DPDP-aligned text): `src/app/privacy/page.tsx`, `src/app/terms/page.tsx`, `src/app/refund/page.tsx` — all `○` static, required for Razorpay onboarding.
+
+  **Build verification:**
+  - `npm run typecheck` — PASS (zero errors).
+  - `npm run build` — PASS, 19 routes.
+  - `/` is `○` static (marketing landing).
+  - `/app`, `/app/policies`, `/app/policies/[id]`, `/app/billing`, `/app/alerts`, `/app/settings` — `ƒ` dynamic (server-rendered, protected).
+  - `/privacy`, `/terms`, `/refund`, `/login`, `/onboarding` — `○` static (public).
+
+- Component paths (new/changed):
+  - `frontend/src/app/page.tsx` — marketing home (rewritten)
+  - `frontend/src/app/app/` — authenticated app (new real path segment)
+  - `frontend/src/app/(app)/` — legacy stubs redirecting to `/app/*`
+  - `frontend/src/app/privacy/page.tsx`, `terms/page.tsx`, `refund/page.tsx` — legal stubs
+  - `frontend/src/components/marketing/` — logo, navbar, hero, problem, features, how-it-works, alerts-highlight, security, pricing, faq, final-cta, footer
+  - `frontend/src/components/ui/accordion.tsx` — new shadcn accordion
+  - `frontend/src/app/globals.css` — accordion keyframe animations added
+
+- Route map:
+  - `/` → marketing landing (public, SSG)
+  - `/login` → login page (public, SSG)
+  - `/onboarding` → onboarding wizard (public, SSG)
+  - `/auth/callback` → OAuth callback (dynamic)
+  - `/app` → dashboard (protected, dynamic)
+  - `/app/policies` → policies list (protected, dynamic)
+  - `/app/policies/[id]` → policy detail (protected, dynamic)
+  - `/app/billing` → billing (protected, dynamic)
+  - `/app/alerts` → alerts (protected, dynamic)
+  - `/app/settings` → settings (protected, dynamic)
+  - `/privacy`, `/terms`, `/refund` → legal pages (public, SSG)
+  - `/alerts`, `/billing`, `/policies`, `/settings` → static redirects → `/app/*`
