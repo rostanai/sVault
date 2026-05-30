@@ -35,6 +35,11 @@
 - Contract updated: FEATURES, DECISIONS, TEAM, PERMISSIONS, PROJECT_BRIEF, CLAUDE.md; agents db/auth/api/billing/ui.
 - Open questions / decisions needed: Q5–Q12 in DECISIONS.md.
 
+### 2026-05-30 — auth-rbac/api — M1 part 1: auth & authz foundation (code, pushed)
+- Did: On branch `m1-auth-org` — `core/security.py` (Supabase JWT verify + claim extraction from app_metadata, CurrentUser), `core/authz.py` (Role enum, permission matrix mirroring PERMISSIONS.md, has_permission, require_permission/require_super_admin deps, super-admin bypass, 404-not-403). 19 unit tests green, ruff clean. Pushed `m0-foundation` + `m1-auth-org` to origin.
+- BLOCKED: (1) GitHub `main` not seeded (empty repo → no PR base); need user decision. (2) DB-dependent M1 (SQLAlchemy models, async session via pooler, signup→tenant/org creation, RLS integration + isolation tests) needs Supabase MCP auth (`claude /mcp`).
+- Next (M1 part 2 once DB live): models, async session, auth/signup/invite endpoints, org context, RLS isolation tests.
+
 ### 2026-05-30 — project-setup/api/devops — M0 foundation scaffold (DONE, code)
 - Did: Scaffolded the monorepo and committed to branch `m0-foundation` (74 files).
   **backend/**: FastAPI app factory, /health + /ready, config (pydantic-settings), structured JSON logging,
