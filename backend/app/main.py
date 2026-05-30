@@ -26,7 +26,8 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if not settings.is_prod else [],  # tighten in prod (M6)
+        # In prod, allow only the configured origins (CORS_ORIGINS); open in dev.
+        allow_origins=settings.cors_origins_list or (["*"] if not settings.is_prod else []),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
