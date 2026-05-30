@@ -35,6 +35,11 @@
 - Contract updated: FEATURES, DECISIONS, TEAM, PERMISSIONS, PROJECT_BRIEF, CLAUDE.md; agents db/auth/api/billing/ui.
 - Open questions / decisions needed: Q5–Q12 in DECISIONS.md.
 
+### 2026-05-30 — db/api/devops — DB LIVE + M2 policies + isolation PROVEN
+- Did: Authenticated Supabase (plugin MCP). Applied all migrations 0001-0010 to project hgopttbpoyvmlzgzyzio — **21 tables, RLS on all**, enums/functions/triggers/indexes (HNSW+trgm)/realtime publication. Security advisor 18→4 WARN (only low-risk extension_in_public left). Added **Vercel MCP** + `docs/DEPLOYMENT.md` (two-project GitHub auto-deploy). Built **M2 policy/provider CRUD** (models, service with tenant/org scoping + ownership, endpoints) → branch m2-policies, **PR #2** (base m1-auth-org), 34 tests green.
+- **VERIFIED (M1/M2 gate):** ran live RLS test — a Tenant-A admin sees only Tenant-A's policy, not Tenant-B's (cross-tenant isolation confirmed at the DB layer; test rolled back).
+- Open: Vercel MCP auth (restart + /mcp), set DATABASE_URL in CI for live integration tests, M2 document upload (Storage).
+
 ### 2026-05-30 — auth-rbac/api — M1 part 1: auth & authz foundation (code, pushed)
 - Did: On branch `m1-auth-org` — `core/security.py` (Supabase JWT verify + claim extraction from app_metadata, CurrentUser), `core/authz.py` (Role enum, permission matrix mirroring PERMISSIONS.md, has_permission, require_permission/require_super_admin deps, super-admin bypass, 404-not-403). 19 unit tests green, ruff clean. Pushed `m0-foundation` + `m1-auth-org` to origin.
 - BLOCKED: (1) GitHub `main` not seeded (empty repo → no PR base); need user decision. (2) DB-dependent M1 (SQLAlchemy models, async session via pooler, signup→tenant/org creation, RLS integration + isolation tests) needs Supabase MCP auth (`claude /mcp`).
