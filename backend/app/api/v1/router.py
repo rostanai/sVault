@@ -13,6 +13,7 @@ from app.api.v1 import (
     platform,
     policies,
     providers,
+    users,
 )
 
 api_router = APIRouter()
@@ -20,6 +21,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)          # M1
 api_router.include_router(orgs.router)          # M1
 api_router.include_router(invitations.router)   # M1
+api_router.include_router(users.router)         # team/user management
 api_router.include_router(policies.router)      # M2
 api_router.include_router(providers.router)     # M2
 api_router.include_router(documents.router)     # M2

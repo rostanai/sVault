@@ -321,3 +321,151 @@ export const getSubscription = (token: string) =>
 
 export const getInvoices = (token: string) =>
   apiFetch<InvoiceRead[]>("/billing/invoices", { token, silent: true });
+
+// ── Billing: subscribe ────────────────────────────────────────────────────────
+
+export interface SubscribeResponse {
+  subscription_id: string;
+  status: string;
+  plan_id: string;
+  razorpay_subscription_id: string | null;
+  short_url: string | null;
+}
+
+export const subscribe = (token: string, planId: string) =>
+  apiFetch<SubscribeResponse>("/billing/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ plan_id: planId }),
+    token,
+  });
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+export type DocType =
+  | "policy"
+  | "schedule"
+  | "endorsement"
+  | "invoice"
+  | "claim"
+  | "other";
+
+export interface UploadUrlResponse {
+  upload_url: string;
+  storage_path: string;
+  note?: string;
+}
+
+export interface DocumentRead {
+  id: string;
+  file_name: string;
+  doc_type: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  version: number;
+  created_at: string;
+  download_url: string;
+}
+
+export const getDocumentUploadUrl = (
+  token: string,
+  policyId: string,
+  body: { file_name: string; content_type: string }
+) =>
+  apiFetch<UploadUrlResponse>(
+    `/policies/${policyId}/documents/upload-url`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      token,
+    }
+  );
+
+// Raw PUT to Supabase Storage — no auth header, no JSON wrapper.
+export async function uploadFileToStorage(
+  uploadUrl: string,
+  file: File
+): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": file.type },
+  });
+  if (!res.ok) {
+    throw new Error(`Storage upload failed: ${res.status}`);
+  }
+}
+
+export const recordDocument = (
+  token: string,
+  policyId: string,
+  body: {
+    storage_path: string;
+    file_name: string;
+    content_type: string;
+    size_bytes: number;
+    doc_type: DocType;
+  }
+) =>
+  apiFetch<DocumentRead>(`/policies/${policyId}/documents`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const listDocuments = (token: string, policyId: string) =>
+  apiFetch<DocumentRead[]>(`/policies/${policyId}/documents`, { token });
+
+export const deleteDocument = (token: string, documentId: string) =>
+  apiFetch<void>(`/documents/${documentId}`, {
+    method: "DELETE",
+    token,
+    silent: true,
+  });
+
+// ── Users / Invitations ───────────────────────────────────────────────────────
+
+export interface ProfileRead {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  org_id: string | null;
+  is_active: boolean;
+}
+
+export interface RoleUpdate {
+  role: string;
+  is_active?: boolean;
+}
+
+export interface InvitationRead {
+  id: string;
+  email: string;
+  role: string;
+  org_id: string | null;
+  expires_at: string;
+  token?: string;
+}
+
+export const getUsers = (token: string) =>
+  apiFetch<ProfileRead[]>("/users", { token });
+
+export const updateUser = (token: string, userId: string, body: RoleUpdate) =>
+  apiFetch<ProfileRead>(`/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const getInvitations = (token: string) =>
+  apiFetch<InvitationRead[]>("/invitations", { token, silent: true });
+
+export const createInvitation = (
+  token: string,
+  body: { email: string; role: string; org_id?: string }
+) =>
+  apiFetch<InvitationRead>("/invitations", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });

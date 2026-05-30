@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import Script from "next/script";
 import {
   getInvoices,
   getPlans,
   getSubscription,
+  subscribe,
   type InvoiceRead,
   type PlanRead,
   type SubscriptionWithEntitlements,
@@ -28,8 +30,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Check, AlertTriangle, Zap, Download, FileText } from "lucide-react";
+import { Check, AlertTriangle, Zap, Download, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+
+// Allow TypeScript to recognise the globally injected Razorpay script.
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Razorpay: any;
+  }
+}
 
 interface Props {
   token: string;
@@ -41,6 +51,13 @@ export default function BillingClient({ token }: Props) {
   const [invoices, setInvoices] = useState<InvoiceRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [upgradingPlanId, setUpgradingPlanId] = useState<string | null>(null);
+
+  const refreshSubscription = useCallback(() => {
+    getSubscription(token)
+      .then(setSubData)
+      .catch(() => {/* silent — subscription will just stay stale */});
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -55,11 +72,62 @@ export default function BillingClient({ token }: Props) {
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-    // Invoices load independently — a missing endpoint shouldn't break the page.
+    // Invoices are independent; a missing endpoint must not break the page.
     getInvoices(token)
       .then(setInvoices)
       .catch(() => setInvoices([]));
   }, [token]);
+
+  async function handleUpgrade(plan: PlanRead) {
+    if (!token) return;
+    setUpgradingPlanId(plan.id);
+    try {
+      const result = await subscribe(token, plan.id);
+
+      if (result.razorpay_subscription_id) {
+        // Prefer the Razorpay in-app checkout widget.
+        if (typeof window.Razorpay !== "undefined") {
+          const rzp = new window.Razorpay({
+            key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+            subscription_id: result.razorpay_subscription_id,
+            name: "sVault",
+            description: plan.name,
+            theme: { color: "#2746c9" },
+            handler: () => {
+              toast.success("Payment received — your plan is activating.", {
+                description: "This may take a moment to reflect.",
+                duration: 6000,
+              });
+              // Refresh subscription status so UI updates.
+              setTimeout(refreshSubscription, 3000);
+            },
+          });
+          rzp.open();
+        } else if (result.short_url) {
+          // Razorpay script didn't load (e.g. ad-blocker) — open the hosted page.
+          window.open(result.short_url, "_blank", "noopener,noreferrer");
+          toast.info("Complete your payment in the new tab.", {
+            description: "The page will update once payment is confirmed.",
+          });
+        } else {
+          toast.success("Subscription created. Awaiting payment confirmation.");
+        }
+      } else if (result.short_url) {
+        // No Razorpay subscription ID yet (plan not configured in Razorpay) — open short URL.
+        window.open(result.short_url, "_blank", "noopener,noreferrer");
+      } else {
+        // Local/dev mode — subscription created without Razorpay keys.
+        toast.success(`Switched to ${plan.name} plan.`, {
+          description: "No payment required in this environment.",
+        });
+        refreshSubscription();
+      }
+    } catch {
+      // apiFetch already showed a toast via the error envelope; nothing extra needed.
+    } finally {
+      setUpgradingPlanId(null);
+    }
+  }
 
   if (loading) return <BillingSkeleton />;
   if (error) return <ErrorState message={error} />;
@@ -75,171 +143,175 @@ export default function BillingClient({ token }: Props) {
   const isTrialing = sub?.status === "trialing";
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Billing</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Manage your subscription and plan
-        </p>
-      </div>
+    <>
+      {/* Razorpay checkout.js — loaded once, async, so it doesn't block page. */}
+      <Script
+        src="https://checkout.razorpay.com/v1/checkout.js"
+        strategy="lazyOnload"
+      />
 
-      {/* Current subscription status */}
-      {sub && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-semibold">
-              Current Subscription
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center gap-4">
-              <div>
-                <p className="text-xs text-zinc-500 uppercase tracking-wide">Status</p>
-                <div className="mt-1">
-                  <SubscriptionStatusBadge status={sub.status} />
-                </div>
-              </div>
-              {isTrialing && trialDaysLeft != null && (
-                <div>
-                  <p className="text-xs text-zinc-500 uppercase tracking-wide">
-                    Trial ends
-                  </p>
-                  <p className="mt-1 text-sm font-medium">
-                    {formatDate(trialEndsAt)}{" "}
-                    <span
-                      className={
-                        trialDaysLeft <= 3 ? "text-red-600" : "text-zinc-500"
-                      }
-                    >
-                      ({trialDaysLeft}d left)
-                    </span>
-                  </p>
-                </div>
-              )}
-              {sub.current_period_end && !isTrialing && (
-                <div>
-                  <p className="text-xs text-zinc-500 uppercase tracking-wide">
-                    Next billing
-                  </p>
-                  <p className="mt-1 text-sm font-medium">
-                    {formatDate(sub.current_period_end)}
-                  </p>
-                </div>
-              )}
-              {sub.cancel_at_period_end && (
-                <div>
-                  <p className="text-xs text-amber-600 font-medium">
-                    Cancels at period end
-                  </p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Trial banner */}
-      {isTrialing && trialDaysLeft != null && trialDaysLeft <= 7 && (
-        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950">
-          <Zap className="h-5 w-5 shrink-0 text-amber-600" />
-          <p className="text-sm text-amber-800 dark:text-amber-200">
-            Your trial ends in <strong>{trialDaysLeft} days</strong>. Upgrade
-            to a paid plan to keep access to all features.
+      <div className="space-y-8 max-w-4xl">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Billing</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Manage your subscription and plan
           </p>
         </div>
-      )}
 
-      {/* Plans */}
-      <div>
-        <h3 className="mb-4 text-base font-semibold">Available Plans</h3>
-        {plans.length === 0 ? (
-          <p className="text-sm text-zinc-400">No plans available.</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {plans.map((plan) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                isCurrent={plan.id === currentPlanId}
-                onUpgrade={() => {
-                  // Razorpay integration — stub with toast for now
-                  toast.info(
-                    `Razorpay checkout for "${plan.name}" coming soon.`
-                  );
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Billing history */}
-      <div>
-        <h3 className="mb-4 text-base font-semibold">Billing History</h3>
-        {invoices.length === 0 ? (
+        {/* Current subscription status */}
+        {sub && (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-              <FileText className="mb-2 h-8 w-8 text-zinc-300" />
-              <p className="text-sm text-zinc-500">No invoices yet.</p>
-              <p className="text-xs text-zinc-400">
-                Invoices appear here after your first payment.
-              </p>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">
+                Current Subscription
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-4">
+                <div>
+                  <p className="text-xs text-zinc-500 uppercase tracking-wide">Status</p>
+                  <div className="mt-1">
+                    <SubscriptionStatusBadge status={sub.status} />
+                  </div>
+                </div>
+                {isTrialing && trialDaysLeft != null && (
+                  <div>
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">
+                      Trial ends
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatDate(trialEndsAt)}{" "}
+                      <span
+                        className={
+                          trialDaysLeft <= 3 ? "text-red-600" : "text-zinc-500"
+                        }
+                      >
+                        ({trialDaysLeft}d left)
+                      </span>
+                    </p>
+                  </div>
+                )}
+                {sub.current_period_end && !isTrialing && (
+                  <div>
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">
+                      Next billing
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatDate(sub.current_period_end)}
+                    </p>
+                  </div>
+                )}
+                {sub.cancel_at_period_end && (
+                  <div>
+                    <p className="text-xs text-amber-600 font-medium">
+                      Cancels at period end
+                    </p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
-        ) : (
-          <Card>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>GST</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Invoice</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell>{formatDate(inv.issued_at)}</TableCell>
-                    <TableCell className="font-medium">
-                      {formatINR(inv.amount_inr)}
-                    </TableCell>
-                    <TableCell className="text-zinc-500">
-                      {formatINR(inv.gst_inr)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={inv.status === "paid" ? "success" : "secondary"}
-                        className="capitalize"
-                      >
-                        {inv.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {inv.pdf_url ? (
-                        <Button asChild variant="outline" size="sm">
-                          <a
-                            href={inv.pdf_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <Download className="mr-1.5 h-3.5 w-3.5" />
-                            Download
-                          </a>
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-zinc-400">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
         )}
+
+        {/* Trial banner */}
+        {isTrialing && trialDaysLeft != null && trialDaysLeft <= 7 && (
+          <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950">
+            <Zap className="h-5 w-5 shrink-0 text-amber-600" />
+            <p className="text-sm text-amber-800 dark:text-amber-200">
+              Your trial ends in <strong>{trialDaysLeft} days</strong>. Upgrade
+              to a paid plan to keep access to all features.
+            </p>
+          </div>
+        )}
+
+        {/* Plans */}
+        <div>
+          <h3 className="mb-4 text-base font-semibold">Available Plans</h3>
+          {plans.length === 0 ? (
+            <p className="text-sm text-zinc-400">No plans available.</p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {plans.map((plan) => (
+                <PlanCard
+                  key={plan.id}
+                  plan={plan}
+                  isCurrent={plan.id === currentPlanId}
+                  isUpgrading={upgradingPlanId === plan.id}
+                  onUpgrade={() => handleUpgrade(plan)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Billing history */}
+        <div>
+          <h3 className="mb-4 text-base font-semibold">Billing History</h3>
+          {invoices.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                <FileText className="mb-2 h-8 w-8 text-zinc-300" />
+                <p className="text-sm text-zinc-500">No invoices yet.</p>
+                <p className="text-xs text-zinc-400">
+                  Invoices appear here after your first payment.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>GST</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Invoice</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv) => (
+                    <TableRow key={inv.id}>
+                      <TableCell>{formatDate(inv.issued_at)}</TableCell>
+                      <TableCell className="font-medium">
+                        {formatINR(inv.amount_inr)}
+                      </TableCell>
+                      <TableCell className="text-zinc-500">
+                        {formatINR(inv.gst_inr)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={inv.status === "paid" ? "success" : "secondary"}
+                          className="capitalize"
+                        >
+                          {inv.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {inv.pdf_url ? (
+                          <Button asChild variant="outline" size="sm">
+                            <a
+                              href={inv.pdf_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <Download className="mr-1.5 h-3.5 w-3.5" />
+                              Download
+                            </a>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-zinc-400">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -248,10 +320,12 @@ export default function BillingClient({ token }: Props) {
 function PlanCard({
   plan,
   isCurrent,
+  isUpgrading,
   onUpgrade,
 }: {
   plan: PlanRead;
   isCurrent: boolean;
+  isUpgrading: boolean;
   onUpgrade: () => void;
 }) {
   const entitlements = Object.entries(plan.entitlements ?? {}).slice(0, 5);
@@ -315,8 +389,19 @@ function PlanCard({
             Current Plan
           </Button>
         ) : (
-          <Button className="w-full" onClick={onUpgrade}>
-            Upgrade to {plan.name}
+          <Button
+            className="w-full"
+            onClick={onUpgrade}
+            disabled={isUpgrading}
+          >
+            {isUpgrading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Opening checkout…
+              </>
+            ) : (
+              `Upgrade to ${plan.name}`
+            )}
           </Button>
         )}
       </CardContent>
@@ -325,7 +410,10 @@ function PlanCard({
 }
 
 function SubscriptionStatusBadge({ status }: { status: string }) {
-  const variants: Record<string, "success" | "warning" | "destructive" | "secondary"> = {
+  const variants: Record<
+    string,
+    "success" | "warning" | "destructive" | "secondary"
+  > = {
     trialing: "warning",
     active: "success",
     cancelled: "destructive",

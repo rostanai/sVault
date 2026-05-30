@@ -70,3 +70,19 @@ class InvitationRead(BaseModel):
 
 class AcceptInvite(BaseModel):
     token: str
+
+
+# ---- user / team management ----
+class ProfileRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: str | None
+    full_name: str | None
+    role: str
+    org_id: uuid.UUID | None
+    is_active: bool
+
+
+class RoleUpdate(BaseModel):
+    role: TenantRole
+    is_active: bool | None = None
