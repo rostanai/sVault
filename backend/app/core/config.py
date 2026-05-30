@@ -22,11 +22,20 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""  # server-only; bypasses RLS
-    supabase_jwt_secret: str = ""  # verifies Supabase-issued JWTs (HS256)
+    supabase_jwt_secret: str = ""  # legacy HS256 shared secret (fallback)
     jwt_algorithms: tuple[str, ...] = ("HS256",)
+    # JWKS endpoint for asymmetric (ES256/RS256) JWTs. Empty => Supabase well-known URL.
+    supabase_jwks_url: str = ""
+
+    # CORS allowed origins (comma-separated). Empty in prod = no cross-origin.
+    cors_origins: str = ""
 
     # Timezone for all scheduling/expiry math (India default)
     timezone: str = "Asia/Kolkata"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     # Observability
     sentry_dsn: str = ""
