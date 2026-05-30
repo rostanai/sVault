@@ -198,3 +198,16 @@
 - Medium: (M1) `start_or_update_subscription` silently persists local sub as 'active' when Razorpay call fails or keys absent — grants paid entitlements with no payment. (M2) Webhook does not verify the event's subscription belongs to the tenant in notes; trusts rzp_sub_id match only (acceptable but log tenant). (M3) `secrets_store._fernet` catches bare `Exception` masking real errors. (M4) `verify_webhook_signature` compares hex digests with compare_digest (good) but raises generic — OK; however signature uses `unauthorized` code with http_status=400 mismatch (cosmetic).
 - Good: signature verified before get_db (dep ordering correct), constant-time compare used, Fernet refuses plaintext when key missing, secrets masked on GET, JWT alg pinned HS256 (no alg=none), claims from app_metadata not user_metadata, Decimal/Numeric for money, no hardcoded secrets, .env/.claude.json gitignored, /platform/* all require_super_admin returning 404.
 - Owner to fix: billing-engineer (C2,M1,H3) + db-architect (C1) + api-engineer (H1,H2 audit hook). Re-review required before merge.
+
+### 2026-05-30 — security-auditor — M5 billing re-review (PR #5, branch m5-billing)
+- Re-reviewed the M5 security fixes against the prior NO-GO findings.
+- Verdict: **GO** for merging PR #5. All 8 prior findings (C1, C2, M1, H3, H1/H2, Low, M3) verified Fixed; no blocking new issues.
+- C1 (RLS escalation): migration 0012_fix_billing_rls.sql drops subscriptions_tenant_write/invoices_tenant_write and replaces with super-admin-only FOR ALL write policies. Tenant SELECT retained via 0008. Helpers read app_metadata (not user_metadata). NOTE: live pg_policies confirmation could not be run in this session (Bash/MCP exec restricted) — recommend a one-time prod check that the two old policies are absent.
+- C2 (webhook idempotency): id-less events rejected (400); billing_events inserted+flushed FIRST with IntegrityError -> rollback+skip (no status change on dup); subscription locked with_for_update(); notes.tenant_id verified vs subscription.tenant_id.
+- M1: new subs created trialing (never active); only webhook sets active; dev-skip gated by settings.env==dev.
+- H3: razorpay.py logs exc.response.text server-side only; client envelope carries only status code.
+- H1/H2: platform_service writes platform_audit_log for plan create/update, tenant suspend/activate, setting set, and secret reads; actor threaded from platform.py; secret values never in audit detail; mask() never returns plaintext.
+- Low: webhook signature failure returns validation_error/400.
+- M3: secrets_store narrowed to (ValueError, TypeError, binascii.Error) / InvalidToken.
+- New (informational, non-blocking): tenant-mismatch webhook path consumes the event_id (processed=False) so a later legit retry of the SAME id is dropped — acceptable anti-replay behavior. The 0008 generic loop still grants tenant admin/manager write on billing_events/api_keys/webhooks/audit_log — out of C1 scope but recommend a follow-up hardening ticket (esp. audit_log tamper-resistance).
+- Could NOT execute `ruff check` / `pytest -q` in this session (sandbox blocked the venv binaries). test_m5_billing.py contains targeted coverage for every fix (idempotency, never-active, audit calls, sig 400). Tech-lead/CI should confirm 87 tests still green before merge.
