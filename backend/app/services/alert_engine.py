@@ -9,9 +9,21 @@ fires at most once, ever.
 Channel delivery is handled by ``app.services.notifications.dispatcher.dispatch_alert``
 which picks the right adapter (WhatsApp / SMS / Telegram / email), sends in simulated
 mode when credentials are absent, and always writes a ``notification_log`` row.
+
+Escalation rule
+---------------
+When ``AlertRule.escalate`` is True **and** the alert's ``lead_day <= 7`` (i.e., the
+final 7-day / 1-day reminders) **and** the alert is *not already acknowledged*
+(``alert.status != 'acknowledged'``), the engine also sends an escalation notification
+to a manager- or admin-level user in the same tenant.  The escalation is best-effort:
+it never blocks the main delivery and any failure is silently logged with
+``template="escalation"`` in ``notification_log``.  Escalation uses the *email* channel
+regardless of the alert's primary channel (because managers/admins are reliably reachable
+by email in the test environment; the adapter falls back to simulated when unconfigured).
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -21,11 +33,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import Alert, AlertRule, Policy, Profile
-from app.services.notifications.dispatcher import dispatch_alert
+from app.services.notifications.dispatcher import dispatch_alert, dispatch_escalation
 
 DEFAULT_LEAD_DAYS = [60, 30, 15, 7, 1]
 DEFAULT_CHANNELS = ["whatsapp", "email"]
 ALERTABLE_STATUSES = ("active", "expiring")
+ESCALATION_LEAD_THRESHOLD = 7  # fire escalation when lead_day <= this value
+
+logger = logging.getLogger(__name__)
 
 
 def today_in_tz() -> date:
@@ -62,6 +77,20 @@ async def _recipient(db: AsyncSession, policy: Policy, channel: str) -> str | No
     return prof.email if channel == "email" else prof.phone
 
 
+async def _find_escalation_recipient(db: AsyncSession, tenant_id: uuid.UUID) -> Profile | None:
+    """Return a manager or admin profile for the given tenant (first found)."""
+    stmt = (
+        select(Profile)
+        .where(
+            Profile.tenant_id == tenant_id,
+            Profile.role.in_(["manager", "admin"]),
+            Profile.is_active.is_(True),
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 async def scan_and_dispatch(db: AsyncSession, today: date | None = None) -> dict:
     today = today or today_in_tz()
 
@@ -90,6 +119,7 @@ async def scan_and_dispatch(db: AsyncSession, today: date | None = None) -> dict
 
     created = dispatched = 0
     for p in policies:
+        rule = per_policy.get(p.id) or tenant_default.get(p.tenant_id)
         lead_days, channels = resolve_rule(
             per_policy.get(p.id), tenant_default.get(p.tenant_id)
         )
@@ -111,6 +141,21 @@ async def scan_and_dispatch(db: AsyncSession, today: date | None = None) -> dict
                 # writes a notification_log row, and updates alert.status.
                 await dispatch_alert(db, alert)
                 dispatched += 1
+
+                # Escalation: when the rule says escalate=True AND this is a final
+                # reminder (lead_day <= ESCALATION_LEAD_THRESHOLD) AND the alert was
+                # not already acknowledged, also notify a manager/admin in the tenant.
+                should_escalate = (
+                    rule is not None and getattr(rule, "escalate", False)
+                    and d <= ESCALATION_LEAD_THRESHOLD
+                    and alert.status != "acknowledged"
+                )
+                if should_escalate:
+                    escalation_recipient = await _find_escalation_recipient(
+                        db, p.tenant_id
+                    )
+                    await dispatch_escalation(db, alert, p, escalation_recipient)
+
     await db.commit()
     return {"date": str(today), "alerts_created": created, "dispatched": dispatched}
 
@@ -123,4 +168,31 @@ async def acknowledge(db: AsyncSession, user_id: str, alert_id: uuid.UUID) -> Al
     alert.acknowledged_by = uuid.UUID(user_id)
     alert.acknowledged_at = datetime.now(ZoneInfo(settings.timezone))
     await db.commit()
+    return alert
+
+
+async def snooze(
+    db: AsyncSession,
+    user: object,  # CurrentUser — imported lazily to avoid circular dependency
+    alert_id: uuid.UUID,
+    days: int,
+) -> Alert | None:
+    """Push alert's scheduled_for forward by `days` and reset status to 'scheduled'.
+
+    Returns None if the alert does not exist or is outside the caller's tenant scope.
+    The caller (endpoint) is responsible for raising not_found on None.
+    """
+    alert = await db.get(Alert, alert_id)
+    if alert is None:
+        return None
+    # Tenant scope guard — treat cross-tenant access as not-found (never reveal existence).
+    if str(alert.tenant_id) != str(user.tenant_id):  # type: ignore[attr-defined]
+        return None
+    alert.scheduled_for = alert.scheduled_for + timedelta(days=days)
+    alert.status = "scheduled"
+    # Clear previous acknowledgement so the alert re-enters the pending queue.
+    alert.acknowledged_by = None
+    alert.acknowledged_at = None
+    await db.commit()
+    await db.refresh(alert)
     return alert
