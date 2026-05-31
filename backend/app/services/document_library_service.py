@@ -7,6 +7,7 @@ policy_service._accessible_org_filter.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -209,25 +210,27 @@ async def list_library(
     # ------------------------------------------------------------------
     # Step 4: fetch signed download URLs (one per doc) and build items.
     # ------------------------------------------------------------------
-    items: list[DocumentLibraryItem] = []
-    for doc_row in docs_by_id.values():
-        try:
-            url = await storage.create_signed_download_url(doc_row.storage_path)
-        except Exception:  # storage not reachable in tests / dev
-            url = ""
-        items.append(
-            DocumentLibraryItem(
-                id=doc_row.id,
-                file_name=doc_row.file_name,
-                doc_type=doc_row.doc_type,
-                mime_type=doc_row.mime_type,
-                size_bytes=doc_row.size_bytes,
-                created_at=doc_row.created_at,
-                download_url=url,
-                policy_id=doc_row.policy_id,
-                policy_title=doc_row.policy_title,
-                policy_category=doc_row.policy_category,
-                snippet=chunk_snippets.get(doc_row.id),
-            )
+    # Sign all download URLs concurrently rather than serially. return_exceptions
+    # preserves the per-doc tolerance (storage unreachable in tests/dev → empty URL).
+    doc_rows = list(docs_by_id.values())
+    signed = await asyncio.gather(
+        *(storage.create_signed_download_url(d.storage_path) for d in doc_rows),
+        return_exceptions=True,
+    )
+    items: list[DocumentLibraryItem] = [
+        DocumentLibraryItem(
+            id=doc_row.id,
+            file_name=doc_row.file_name,
+            doc_type=doc_row.doc_type,
+            mime_type=doc_row.mime_type,
+            size_bytes=doc_row.size_bytes,
+            created_at=doc_row.created_at,
+            download_url="" if isinstance(url, BaseException) else url,
+            policy_id=doc_row.policy_id,
+            policy_title=doc_row.policy_title,
+            policy_category=doc_row.policy_category,
+            snippet=chunk_snippets.get(doc_row.id),
         )
+        for doc_row, url in zip(doc_rows, signed, strict=True)
+    ]
     return items
