@@ -24,6 +24,7 @@ import {
   Shield,
   Sparkles,
   CheckSquare,
+  FileBarChart,
   Menu,
   X,
   LogOut,
@@ -47,6 +48,7 @@ const navItems: NavItem[] = [
   { label: "Ask sVault", href: "/app/ask", icon: Sparkles },
   { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
   { label: "Alerts", href: "/app/alerts", icon: Bell },
+  { label: "Reports", href: "/app/reports", icon: FileBarChart },
   { label: "Billing", href: "/app/billing", icon: CreditCard },
   { label: "Settings", href: "/app/settings", icon: Settings },
 ];
