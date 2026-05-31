@@ -1355,7 +1355,7 @@ export type ClaimStatus =
 export interface ClaimRead {
   id: string;
   policy_id: string;
-  org_id: string;
+  org_id: string | null;
   claim_number: string | null;
   status: string;
   claim_amount_inr: string | null;
@@ -1366,24 +1366,12 @@ export interface ClaimRead {
   created_by: string | null;
   created_at: string;
   updated_at: string;
-  policy_title: string | null;
-}
-
-export interface ClaimEvent {
-  id: string;
-  claim_id: string;
-  event_type: string;
-  from_status: string | null;
-  to_status: string | null;
-  note: string | null;
-  created_by: string | null;
-  created_at: string;
+  policy_title?: string | null; // enriched on list
 }
 
 export interface ClaimCreate {
   policy_id: string;
   claim_number?: string;
-  status?: ClaimStatus;
   claim_amount_inr?: string;
   incident_date?: string;
   description?: string;
@@ -1396,7 +1384,18 @@ export interface ClaimUpdate {
   approved_amount_inr?: string;
   incident_date?: string;
   description?: string;
-  note?: string;
+  note?: string; // optional note logged with a status change
+}
+
+export interface ClaimEvent {
+  id: string;
+  claim_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export const getClaims = (
