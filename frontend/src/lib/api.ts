@@ -767,3 +767,98 @@ export const revokeApiKey = (token: string, keyId: string) =>
     token,
     silent: true,
   });
+
+// ── Super Admin / Platform (super_admin only) ───────────────────────────────────
+
+export interface PlatformTenant {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface PlatformSetting {
+  key: string;
+  value: string | null; // masked for secrets
+  is_secret: boolean;
+  updated_at: string | null;
+}
+
+export interface PlatformAnalytics {
+  tenants: { total: number; active: number; suspended: number };
+  subscriptions: Record<string, number>; // by status: trialing/active/past_due/cancelled/expired
+  by_tier: { tier: string; count: number }[];
+  mrr_inr: string;
+}
+
+export interface PlanWrite {
+  tier?: string;
+  name?: string;
+  description?: string | null;
+  price_inr?: string;
+  billing_period?: string;
+  is_active?: boolean;
+  entitlements?: Record<string, unknown>;
+  razorpay_plan_id?: string | null;
+}
+
+// Plans (platform view — includes inactive)
+export const adminListPlans = (token: string) =>
+  apiFetch<PlanRead[]>("/platform/plans", { token });
+
+export const adminCreatePlan = (token: string, body: PlanWrite) =>
+  apiFetch<PlanRead>("/platform/plans", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const adminUpdatePlan = (token: string, planId: string, body: PlanWrite) =>
+  apiFetch<PlanRead>(`/platform/plans/${planId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+
+// Tenants
+export const adminListTenants = (
+  token: string,
+  params?: { limit?: number; offset?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<PlatformTenant[]>(`/platform/tenants${query}`, { token });
+};
+
+export const adminSuspendTenant = (token: string, tenantId: string) =>
+  apiFetch<PlatformTenant>(`/platform/tenants/${tenantId}/suspend`, {
+    method: "POST",
+    token,
+  });
+
+export const adminActivateTenant = (token: string, tenantId: string) =>
+  apiFetch<PlatformTenant>(`/platform/tenants/${tenantId}/activate`, {
+    method: "POST",
+    token,
+  });
+
+// Global settings / secrets
+export const adminGetSetting = (token: string, key: string) =>
+  apiFetch<PlatformSetting>(`/platform/settings/${key}`, { token, silent: true });
+
+export const adminSetSetting = (
+  token: string,
+  key: string,
+  body: { value: string; is_secret?: boolean }
+) =>
+  apiFetch<PlatformSetting>(`/platform/settings/${key}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+    token,
+  });
+
+// Platform analytics (overview)
+export const adminGetAnalytics = (token: string) =>
+  apiFetch<PlatformAnalytics>("/platform/analytics", { token });
