@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    account,
     alerts,
     api_keys,
     approvals,
@@ -10,6 +11,7 @@ from app.api.v1 import (
     billing,
     calendar,
     dashboard,
+    digests,
     document_library,
     documents,
     exports,
@@ -59,3 +61,5 @@ api_router.include_router(onboarding.router)        # first-run checklist
 api_router.include_router(calendar.router)          # iCalendar (.ics) renewal feed
 api_router.include_router(installments.router)      # policy premium installments
 api_router.include_router(providers.contact_router) # provider contact-log DELETE
+api_router.include_router(digests.router)           # weekly renewal email digest
+api_router.include_router(account.router)           # DPDP data export
