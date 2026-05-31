@@ -670,3 +670,98 @@ export const setAlertRule = (
     body: JSON.stringify(body),
     token,
   });
+
+// ── AI Policy Intake (auto-extract from a document) ──────────────────────────
+
+export interface PolicyExtraction {
+  category: PolicyCategory | null;
+  title: string | null;
+  policy_number: string | null;
+  insurer_name: string | null;
+  sum_insured_inr: string | null;
+  premium_inr: string | null;
+  gst_inr: string | null;
+  inception_date: string | null; // YYYY-MM-DD
+  expiry_date: string | null; // YYYY-MM-DD
+  extracted_text_chars: number;
+  notes: string | null;
+}
+
+/**
+ * Upload a policy PDF and let sVault AI extract structured fields for review.
+ * Multipart upload — does NOT persist anything; the caller reviews then creates
+ * the policy via createPolicy. Returns all-null fields + a note for scanned/
+ * unreadable documents (OCR not yet supported).
+ */
+export async function extractPolicyFromDocument(
+  token: string,
+  file: File
+): Promise<PolicyExtraction> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/policies/extract`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }, // no Content-Type — browser sets multipart boundary
+    body: form,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let code = "internal_error";
+    let message = "Extraction failed";
+    let requestId: string | undefined;
+    try {
+      const body = await res.json();
+      if (body?.error) {
+        code = body.error.code ?? code;
+        message = body.error.message ?? message;
+        requestId = body.error.request_id;
+      }
+    } catch {
+      /* non-JSON */
+    }
+    toast.error(message, {
+      description: requestId ? `Request ID: ${requestId}` : undefined,
+      duration: 6000,
+    });
+    throw new AppError(code, message, requestId);
+  }
+  return res.json() as Promise<PolicyExtraction>;
+}
+
+// ── Developer API keys ───────────────────────────────────────────────
+
+export interface ApiKeyRead {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyCreated extends ApiKeyRead {
+  /** Full plaintext key — shown ONCE on creation, never again. */
+  plaintext_key: string;
+}
+
+export const getApiKeys = (token: string) =>
+  apiFetch<ApiKeyRead[]>("/api-keys", { token });
+
+export const createApiKey = (
+  token: string,
+  body: { name: string; scopes?: string[]; expires_in_days?: number }
+) =>
+  apiFetch<ApiKeyCreated>("/api-keys", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const revokeApiKey = (token: string, keyId: string) =>
+  apiFetch<{ id: string; revoked_at: string }>(`/api-keys/${keyId}`, {
+    method: "DELETE",
+    token,
+    silent: true,
+  });
