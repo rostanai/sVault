@@ -867,3 +867,170 @@ class TestPlatformAuditLog:
         assert audit_calls[0]["actor"] == actor_id
         assert audit_calls[0]["action"] == "update"
         assert str(tenant_id) in str(audit_calls[0]["target"])
+
+
+# ---------------------------------------------------------------------------
+# 10. Platform analytics endpoint — auth guard + service shape
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", [
+    ("get", "/api/v1/platform/analytics"),
+])
+async def test_platform_analytics_requires_auth(method, path):
+    """GET /platform/analytics must return 401 without a bearer token."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await getattr(ac, method)(path)
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "unauthorized"
+
+
+class TestGetAnalyticsService:
+    """Service-level test for platform_service.get_analytics — stubs all DB calls."""
+
+    def _make_db(self, tenant_row, sub_rows, tier_rows, mrr_row):
+        """Build an AsyncMock DB that returns the given aggregate rows in order."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        def _result(row):
+            r = MagicMock()
+            r.one = MagicMock(return_value=row)
+            r.all = MagicMock(return_value=row if isinstance(row, list) else [row])
+            return r
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[
+            _result(tenant_row),
+            _result(sub_rows),
+            _result(tier_rows),
+            _result(mrr_row),
+        ])
+        return db
+
+    @pytest.mark.asyncio
+    async def test_analytics_shape_and_types(self):
+        """get_analytics returns a PlatformAnalytics with correct types."""
+        from decimal import Decimal
+        from unittest.mock import AsyncMock, MagicMock
+
+        import app.services.platform_service as ps
+        from app.schemas.billing import PlatformAnalytics
+
+        # --- tenant counts row ---
+        tenant_row = MagicMock()
+        tenant_row.total = 5
+        tenant_row.active = 4
+        tenant_row.suspended = 1
+
+        # --- subscription status rows ---
+        def _sub_row(status, cnt):
+            r = MagicMock()
+            r.status = status
+            r.cnt = cnt
+            return r
+
+        sub_rows = [_sub_row("active", 3), _sub_row("trialing", 1), _sub_row("cancelled", 1)]
+
+        # --- tier rows ---
+        def _tier_row(tier, cnt):
+            r = MagicMock()
+            r.tier = tier
+            r.cnt = cnt
+            return r
+
+        tier_rows = [_tier_row("starter", 2), _tier_row("professional", 1)]
+
+        # --- MRR row ---
+        mrr_row = MagicMock()
+        mrr_row.mrr = Decimal("2997.00")
+
+        db = AsyncMock()
+
+        # db.execute is called 4 times: tenant_counts, sub_status, tier, mrr
+        # Each query uses a different result accessor (.one() for counts, .all() for groups)
+        def _result_one(row):
+            r = MagicMock()
+            r.one = MagicMock(return_value=row)
+            return r
+
+        def _result_all(rows):
+            r = MagicMock()
+            r.all = MagicMock(return_value=rows)
+            return r
+
+        db.execute = AsyncMock(side_effect=[
+            _result_one(tenant_row),
+            _result_all(sub_rows),
+            _result_all(tier_rows),
+            _result_one(mrr_row),
+        ])
+
+        result = await ps.get_analytics(db)
+
+        # Verify the return type is PlatformAnalytics
+        assert isinstance(result, PlatformAnalytics)
+
+        # Tenant counts
+        assert result.tenants.total == 5
+        assert result.tenants.active == 4
+        assert result.tenants.suspended == 1
+
+        # Subscription breakdown dict
+        assert result.subscriptions["active"] == 3
+        assert result.subscriptions["trialing"] == 1
+        assert result.subscriptions["cancelled"] == 1
+
+        # By-tier list
+        assert len(result.by_tier) == 2
+        assert result.by_tier[0].tier == "starter"
+        assert result.by_tier[0].count == 2
+        assert result.by_tier[1].tier == "professional"
+        assert result.by_tier[1].count == 1
+
+        # MRR as string
+        assert result.mrr_inr == "2997.00"
+        assert isinstance(result.mrr_inr, str)
+
+    @pytest.mark.asyncio
+    async def test_analytics_empty_db(self):
+        """get_analytics handles a fresh DB with zero rows gracefully."""
+        from decimal import Decimal
+        from unittest.mock import AsyncMock, MagicMock
+
+        import app.services.platform_service as ps
+        from app.schemas.billing import PlatformAnalytics
+
+        tenant_row = MagicMock()
+        tenant_row.total = 0
+        tenant_row.active = 0
+        tenant_row.suspended = 0
+
+        mrr_row = MagicMock()
+        mrr_row.mrr = Decimal(0)
+
+        def _result_one(row):
+            r = MagicMock()
+            r.one = MagicMock(return_value=row)
+            return r
+
+        def _result_all(rows):
+            r = MagicMock()
+            r.all = MagicMock(return_value=rows)
+            return r
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[
+            _result_one(tenant_row),
+            _result_all([]),   # no subscription status rows
+            _result_all([]),   # no tier rows
+            _result_one(mrr_row),
+        ])
+
+        result = await ps.get_analytics(db)
+
+        assert isinstance(result, PlatformAnalytics)
+        assert result.tenants.total == 0
+        assert result.subscriptions == {}
+        assert result.by_tier == []
+        assert result.mrr_inr == "0"

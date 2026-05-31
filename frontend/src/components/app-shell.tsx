@@ -29,6 +29,7 @@ import {
   LogOut,
   User,
   Zap,
+  ShieldCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -58,6 +59,7 @@ interface AppShellProps {
   planName?: string;
   subscriptionStatus?: string;
   trialDaysLeft?: number | null;
+  isSuperAdmin?: boolean;
 }
 
 export default function AppShell({
@@ -68,6 +70,7 @@ export default function AppShell({
   planName = "Free",
   subscriptionStatus = "free",
   trialDaysLeft = null,
+  isSuperAdmin = false,
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -135,6 +138,14 @@ export default function AppShell({
     </div>
   );
 
+  // Build the full nav list: shared items + conditional Admin item
+  const allNavItems: NavItem[] = [
+    ...navItems,
+    ...(isSuperAdmin
+      ? [{ label: "Admin", href: "/app/admin", icon: ShieldCheck }]
+      : []),
+  ];
+
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <nav
       className={cn(
@@ -144,7 +155,7 @@ export default function AppShell({
       aria-label="Main navigation"
     >
       <div className="flex-1">
-        {navItems.map(({ label, href, icon: Icon }) => (
+        {allNavItems.map(({ label, href, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -153,7 +164,11 @@ export default function AppShell({
               "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
               isActive(href)
                 ? "bg-brand-600 text-white"
-                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
+              // Highlight Admin link distinctly when not active
+              href === "/app/admin" && !isActive(href)
+                ? "border border-dashed border-brand-200 dark:border-brand-900"
+                : ""
             )}
             aria-current={isActive(href) ? "page" : undefined}
           >
