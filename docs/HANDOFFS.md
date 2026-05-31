@@ -702,3 +702,22 @@ NOTE for devops-engineer: `POST /api/v1/digests/dispatch` must be scheduled week
   - `api_router.include_router(account.router)  # DPDP data-export`
 - Permission choice: `get_current_user` (no role restriction). All authenticated users have a DPDP portability right; org scoping is applied inside the service (admin/manager → full tenant; owner/viewer → own org for policies/documents).
 - Results: ruff clean; 383/383 tests pass (7 new + 376 pre-existing).
+
+### 2026-05-31 — auth-rbac-engineer — object-level owner scoping (BOLA defence)
+
+- Implemented object-level access control for the `owner` role across ALL policy-derived reads/aggregations. Owner now sees/acts on only `policies.owner_id == own user id`; Admin/Manager/Viewer/Super-Admin unchanged (org/group scope). Tenant+org scoping unchanged (this ADDS an owner filter on top).
+- Centralised helper added + exported: `policy_service._owner_filter(user)` → user UUID for `owner` role else `None` (Super-Admin always `None`).
+- Service sites updated (each applies `if (oid := _owner_filter(user)) is not None: WHERE policies.owner_id == oid`, or the join/subquery equivalent):
+  - `policy_service.list_policies`, `policy_service.get_policy` (non-owned ⇒ None ⇒ 404, no existence leak). update/delete/renew/mark_renewed + documents/installments/alert-rule inherit via get_policy.
+  - `dashboard_service`: `_scoped()` (single dashboard totals/status/by_category/expiring/upcoming + group totals) and the group per-org `agg_stmt`.
+  - `data_io_service`: `_fetch_policies_for_export` + `fetch_renewal_report`.
+  - `document_library_service`: main JOIN stmt + chunk-resolve `extra_stmt` (filter `Policy.owner_id`).
+  - `alert_service.list_alerts`: `Alert.policy_id IN (SELECT id FROM policies WHERE owner_id = :uid)`.
+  - `notification_feed_service.get_feed` + `get_history`: alerts portion via the same policy-ownership subquery; approvals portion unchanged.
+  - `account_export_service`: policies + policy_documents sections owner-scoped; other sections (tenant/orgs/profiles/providers/installments/approvals) stay tenant/org-scoped per DPDP design.
+- Unchanged by design: providers, approvals (owners still see org approvals), tenant settings. Calendar inherits via list_policies (not double-applied).
+- Tests: NEW `backend/tests/test_object_level_access.py` — 38 behavioural isolation tests running REAL services against in-memory SQLite (aiosqlite, added to pyproject dev extras). Covers: owner sees only own policy (list/get/update/delete/renew/mark_renewed/installments/documents/alert-rule → 404 on other owner's policy), manager+viewer see both, dashboards/reports/exports/document-library/alerts feed/notification feed+history/account-export all owner-isolated, owner CAN reach own sub-resources, cross-tenant still 404, super-admin unrestricted, `_owner_filter` unit tests.
+- No existing tests needed changing: the pre-existing suite mocks the DB and never asserted "owner sees org-wide policies", so behaviour-only owner tests stayed valid.
+- Docs: `docs/PERMISSIONS.md` updated with the enforcement-sites table + an RLS-mirror note for db-architect (add `owner_id = auth.uid()` for `role='owner'` on policies + join/subquery predicates for policy_documents/alerts/policy_installments).
+- Results: `ruff check .` clean; `pytest -q` = 421 passed (383 pre-existing + 38 new).
+- UNSURE/flagged: (1) RLS mirror is NOT yet implemented in migrations — needs db-architect (noted in PERMISSIONS.md). (2) document_library/RAG full-text-search paths use Postgres `to_tsvector` so the SEARCH path isn't exercised by the SQLite tests; the owner filter is applied to that path's JOIN + `extra_stmt` and is covered behaviourally by the non-search list path. (3) `api_key`-authenticated developer-API callers: a key resolves to tenant/org + scopes but currently has no notion of an owner "user" — if a key is ever minted with an owner-role principal, confirm `_owner_filter` keys off a real `user_id`; today keys map to admin-level service access, so out of scope here.

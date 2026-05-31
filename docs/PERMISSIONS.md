@@ -54,4 +54,34 @@
 - **Object level** (service-layer check): can this user act on *this* row? (Owner = only own policies.)
 - **Database** (RLS): mirror of the above; RAG/vector search filtered by the same rules.
 
+### Object-level owner scoping (BOLA defence) — implementation
+The **owner** role may only see/act on policies where `policies.owner_id == their user id`,
+for reads AND writes AND everything derived from policies. Admin / Manager / Viewer /
+Super-Admin have **no object restriction** (org/group scope only). Tenant + org scoping is
+applied *in addition*, never replaced.
+
+Centralised helper: `policy_service._owner_filter(user)` → returns the user's UUID for the
+`owner` role, else `None` (Super-Admin always `None`). Applied alongside
+`_accessible_org_filter` at **every** read/aggregation touching `policies`:
+
+| Site | How the owner filter is applied |
+|------|--------------------------------|
+| `policy_service.list_policies` | `WHERE policies.owner_id = :uid` |
+| `policy_service.get_policy` | `WHERE policies.owner_id = :uid` → non-owned ⇒ `None` ⇒ 404 (no existence leak) |
+| `policy_service.update/delete/renew/mark_renewed` | inherit via `get_policy` (+ existing defence-in-depth check in `update_policy`) |
+| documents / installments / alert-rule sub-resources | inherit via `get_policy` |
+| `dashboard_service.get_dashboard` (all aggregates) | owner filter inside `_scoped()` |
+| `dashboard_service.get_group_dashboard` | totals via `_scoped()`; per-org rollup `WHERE owner_id` (collapses to own policies) |
+| `data_io_service` renewal report + policy export | `WHERE policies.owner_id = :uid` |
+| `document_library_service` (list + chunk-resolve join) | join to `policies`, `WHERE policies.owner_id = :uid` |
+| `alert_service.list_alerts` | `WHERE alert.policy_id IN (SELECT id FROM policies WHERE owner_id = :uid)` |
+| `notification_feed_service` feed + history (alerts only) | same policy-ownership subquery; approvals portion unchanged (org-scoped) |
+| `account_export_service` (DPDP) | policies + policy_documents owner-scoped; profiles/providers/installments/approvals stay tenant/org-scoped |
+
+Unchanged (still org-scoped, owners included): **providers**, **approvals** (owners still see
+org approvals), tenant settings. Calendar inherits via `list_policies`.
+Negative + positive isolation tests: `backend/tests/test_object_level_access.py`.
+**RLS mirror (db-architect):** add `policies.owner_id = auth.uid()` for `role = 'owner'` and the
+equivalent join/subquery predicates for `policy_documents`, `alerts`, `policy_installments`.
+
 > ⚠️ If multi-tenant (Q1) is chosen, add a `tenant_id` scope to every rule and RLS policy.

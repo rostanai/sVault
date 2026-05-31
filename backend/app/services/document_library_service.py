@@ -18,6 +18,7 @@ from app.core.security import CurrentUser
 from app.db.models.insurance import Policy, PolicyDocument
 from app.schemas.document import DocumentLibraryItem
 from app.services.org_service import is_group_wide
+from app.services.policy_service import _owner_filter
 
 
 def _accessible_org(user: CurrentUser) -> uuid.UUID | None:
@@ -75,6 +76,10 @@ async def list_library(
     )
     if org is not None:
         stmt = stmt.where(PolicyDocument.org_id == org)
+    # Object-level: an owner sees only documents belonging to their own policies.
+    owner_oid = _owner_filter(user)
+    if owner_oid is not None:
+        stmt = stmt.where(Policy.owner_id == owner_oid)
     if doc_type:
         stmt = stmt.where(PolicyDocument.doc_type == doc_type)
 
@@ -177,6 +182,8 @@ async def list_library(
             )
             if org is not None:
                 extra_stmt = extra_stmt.where(PolicyDocument.org_id == org)
+            if owner_oid is not None:
+                extra_stmt = extra_stmt.where(Policy.owner_id == owner_oid)
             if doc_type:
                 extra_stmt = extra_stmt.where(PolicyDocument.doc_type == doc_type)
             for extra_row in (await db.execute(extra_stmt)).all():
