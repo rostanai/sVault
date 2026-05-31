@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -1034,3 +1035,236 @@ class TestGetAnalyticsService:
         assert result.subscriptions == {}
         assert result.by_tier == []
         assert result.mrr_inr == "0"
+
+
+# ---------------------------------------------------------------------------
+# 11. Subscription lifecycle — cancel / pause / resume (service + endpoint auth)
+# ---------------------------------------------------------------------------
+
+def _make_sub(
+    tenant_id: uuid.UUID,
+    status: str = "active",
+    cancel_at_period_end: bool = False,
+    rzp_sub_id: str | None = None,
+) -> MagicMock:
+    """Build a mock Subscription row."""
+    sub = MagicMock()
+    sub.id = uuid.UUID("00000000-0000-0000-0000-000000000050")
+    sub.tenant_id = tenant_id
+    sub.plan_id = uuid.UUID("00000000-0000-0000-0000-000000000010")
+    sub.status = status
+    sub.cancel_at_period_end = cancel_at_period_end
+    sub.razorpay_subscription_id = rzp_sub_id
+    sub.trial_ends_at = None
+    sub.current_period_start = None
+    sub.current_period_end = None
+    sub.created_at = None
+    sub.updated_at = None
+    return sub
+
+
+def _mock_db_with_sub(sub: MagicMock) -> AsyncMock:
+    """Return an AsyncMock DB whose execute returns the given subscription."""
+    sub_result = MagicMock()
+    sub_result.scalar_one_or_none = MagicMock(return_value=sub)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=sub_result)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
+def _mock_db_no_sub() -> AsyncMock:
+    """Return an AsyncMock DB that returns no subscription row."""
+    no_result = MagicMock()
+    no_result.scalar_one_or_none = MagicMock(return_value=None)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=no_result)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
+class TestCancelSubscription:
+    """cancel_subscription — demo mode (no Razorpay)."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_demo_sets_cancelled_and_flag(self):
+        """Demo: no Razorpay key → status='cancelled', cancel_at_period_end=True."""
+        from unittest.mock import patch
+
+        from app.core import config
+        from app.services.subscription_service import cancel_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="active")
+        db = _mock_db_with_sub(sub)
+
+        with patch.object(config.settings, "razorpay_key_id", ""):
+            result = await cancel_subscription(db, tenant_id)
+
+        assert result.status == "cancelled"
+        assert result.cancel_at_period_end is True
+        db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_no_subscription_raises_not_found(self):
+        """cancel_subscription raises AppError(not_found) when no sub exists."""
+        from app.services.subscription_service import cancel_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        db = _mock_db_no_sub()
+
+        with pytest.raises(AppError) as exc:
+            await cancel_subscription(db, tenant_id)
+        assert exc.value.code.value == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_cancel_real_razorpay_sets_flag_not_cancelled(self):
+        """Real Razorpay: cancel_at_period_end=True but status stays ('active')."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.core import config
+        from app.core import razorpay as rzp_module
+        from app.services.subscription_service import cancel_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="active", rzp_sub_id="sub_rzp_test001")
+        db = _mock_db_with_sub(sub)
+
+        with (
+            patch.object(config.settings, "razorpay_key_id", "rzp_test_key"),
+            patch.object(rzp_module, "_post", AsyncMock(return_value={})),
+        ):
+            result = await cancel_subscription(db, tenant_id)
+
+        # Status must NOT be forced to 'cancelled' (webhook does that)
+        assert result.status == "active"
+        assert result.cancel_at_period_end is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_real_razorpay_api_failure_is_non_fatal(self):
+        """Real Razorpay: API failure is best-effort — sub still gets cancel_at_period_end."""
+        from unittest.mock import patch
+
+        from app.core import config
+        from app.core import razorpay as rzp_module
+        from app.core.errors import AppError as AE
+        from app.core.errors import ErrorCode
+        from app.services.subscription_service import cancel_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="active", rzp_sub_id="sub_rzp_test001")
+        db = _mock_db_with_sub(sub)
+
+        def _fail(*a, **kw):
+            raise AE(ErrorCode.upstream_error, "Razorpay timeout")
+
+        with (
+            patch.object(config.settings, "razorpay_key_id", "rzp_test_key"),
+            patch.object(rzp_module, "_post", AsyncMock(side_effect=_fail)),
+        ):
+            # Must not raise — failure is logged, not propagated
+            result = await cancel_subscription(db, tenant_id)
+
+        assert result.cancel_at_period_end is True
+
+
+class TestPauseSubscription:
+    """pause_subscription sets status='paused'."""
+
+    @pytest.mark.asyncio
+    async def test_pause_sets_paused(self):
+        from app.services.subscription_service import pause_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="active")
+        db = _mock_db_with_sub(sub)
+
+        result = await pause_subscription(db, tenant_id)
+
+        assert result.status == "paused"
+        db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pause_no_subscription_raises_not_found(self):
+        from app.services.subscription_service import pause_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        db = _mock_db_no_sub()
+
+        with pytest.raises(AppError) as exc:
+            await pause_subscription(db, tenant_id)
+        assert exc.value.code.value == "not_found"
+
+
+class TestResumeSubscription:
+    """resume_subscription clears cancel flag and reactivates cancelled/paused."""
+
+    @pytest.mark.asyncio
+    async def test_resume_after_cancel_sets_active_and_clears_flag(self):
+        from app.services.subscription_service import resume_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="cancelled", cancel_at_period_end=True)
+        db = _mock_db_with_sub(sub)
+
+        result = await resume_subscription(db, tenant_id)
+
+        assert result.status == "active"
+        assert result.cancel_at_period_end is False
+        db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_resume_after_pause_sets_active(self):
+        from app.services.subscription_service import resume_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="paused")
+        db = _mock_db_with_sub(sub)
+
+        result = await resume_subscription(db, tenant_id)
+
+        assert result.status == "active"
+        assert result.cancel_at_period_end is False
+
+    @pytest.mark.asyncio
+    async def test_resume_active_with_pending_cancel_clears_flag(self):
+        """Resuming an 'active' sub with cancel_at_period_end=True just clears the flag."""
+        from app.services.subscription_service import resume_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        sub = _make_sub(tenant_id, status="active", cancel_at_period_end=True)
+        db = _mock_db_with_sub(sub)
+
+        result = await resume_subscription(db, tenant_id)
+
+        assert result.status == "active"
+        assert result.cancel_at_period_end is False
+
+    @pytest.mark.asyncio
+    async def test_resume_no_subscription_raises_not_found(self):
+        from app.services.subscription_service import resume_subscription
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        db = _mock_db_no_sub()
+
+        with pytest.raises(AppError) as exc:
+            await resume_subscription(db, tenant_id)
+        assert exc.value.code.value == "not_found"
+
+
+# Endpoint auth guards for the three new routes
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", [
+    "/api/v1/billing/cancel",
+    "/api/v1/billing/pause",
+    "/api/v1/billing/resume",
+])
+async def test_lifecycle_endpoints_require_auth(path):
+    """POST billing/cancel|pause|resume must return 401 without a bearer token."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(path)
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "unauthorized"
