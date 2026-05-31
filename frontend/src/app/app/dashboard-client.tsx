@@ -23,6 +23,11 @@ import {
   Calendar,
   ChevronRight,
 } from "lucide-react";
+import {
+  CategoryBarChart,
+  StatusDonutChart,
+  ExpiryTimelineChart,
+} from "./_charts";
 
 interface Props {
   token: string;
@@ -49,7 +54,7 @@ export default function DashboardClient({ token }: Props) {
   if (error) return <ErrorState message={error} />;
   if (!data) return null;
 
-  const { totals, expiring, by_category, upcoming } = data;
+  const { totals, status_counts, expiring, by_category, upcoming } = data;
 
   return (
     <div className="space-y-6">
@@ -96,8 +101,15 @@ export default function DashboardClient({ token }: Props) {
         <ExpiryCard label="Expiring in 90 days" count={expiring.next_90} variant="secondary" />
       </div>
 
+      {/* Charts row */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <CategoryBarChart data={by_category} />
+        <StatusDonutChart statusCounts={status_counts} />
+        <ExpiryTimelineChart expiring={expiring} />
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* By category */}
+        {/* By category (text list kept for accessibility / quick scan) */}
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-semibold">By Category</CardTitle>
@@ -189,7 +201,7 @@ export default function DashboardClient({ token }: Props) {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────
 
 function StatCard({
   title,
