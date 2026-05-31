@@ -8,7 +8,7 @@
 import { categorylabel, statusLabel } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-// ── Types ───────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface CategoryEntry {
   category: string;
