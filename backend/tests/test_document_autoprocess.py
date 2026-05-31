@@ -90,7 +90,7 @@ async def test_auto_process_indexes_extracts_and_applies_expiry():
     policy = _policy(expiry=None)
     db = _db(_doc())
     with patch("app.services.policy_service.get_policy", new=AsyncMock(return_value=policy)), \
-         patch("app.services.rag_service.ingest_document", new=AsyncMock(return_value=7)), \
+         patch("app.services.rag_service.index_bytes", new=AsyncMock(return_value=7)), \
          patch("app.services.document_service.storage.create_signed_download_url",
                new=AsyncMock(return_value="https://signed")), \
          patch("app.services.document_service.httpx.AsyncClient", _httpx_returning()), \
@@ -112,7 +112,7 @@ async def test_auto_process_never_overwrites_existing_expiry():
     policy = _policy(expiry=date(2026, 1, 1))
     db = _db(_doc())
     with patch("app.services.policy_service.get_policy", new=AsyncMock(return_value=policy)), \
-         patch("app.services.rag_service.ingest_document", new=AsyncMock(return_value=3)), \
+         patch("app.services.rag_service.index_bytes", new=AsyncMock(return_value=3)), \
          patch("app.services.document_service.storage.create_signed_download_url",
                new=AsyncMock(return_value="https://signed")), \
          patch("app.services.document_service.httpx.AsyncClient", _httpx_returning()), \
@@ -132,7 +132,7 @@ async def test_auto_process_ai_unconfigured_is_soft_note():
     db = _db(_doc())
     err = AppError(ErrorCode.internal_error, "sVault AI is not configured")
     with patch("app.services.policy_service.get_policy", new=AsyncMock(return_value=policy)), \
-         patch("app.services.rag_service.ingest_document", new=AsyncMock(return_value=2)), \
+         patch("app.services.rag_service.index_bytes", new=AsyncMock(return_value=2)), \
          patch("app.services.document_service.storage.create_signed_download_url",
                new=AsyncMock(return_value="https://signed")), \
          patch("app.services.document_service.httpx.AsyncClient", _httpx_returning()), \
@@ -152,7 +152,7 @@ async def test_auto_process_index_failure_does_not_break_extraction():
     policy = _policy(expiry=None)
     db = _db(_doc())
     with patch("app.services.policy_service.get_policy", new=AsyncMock(return_value=policy)), \
-         patch("app.services.rag_service.ingest_document",
+         patch("app.services.rag_service.index_bytes",
                new=AsyncMock(side_effect=RuntimeError("boom"))), \
          patch("app.services.document_service.storage.create_signed_download_url",
                new=AsyncMock(return_value="https://signed")), \

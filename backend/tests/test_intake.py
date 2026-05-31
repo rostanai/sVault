@@ -128,7 +128,7 @@ async def test_scanned_pdf_returns_nulls_no_ai_call(monkeypatch):
             nonlocal ai_was_called
             ai_was_called = True
 
-    monkeypatch.setattr(extraction_service, "AsyncOpenAI", _FakeOpenAI)
+    monkeypatch.setattr("openai.AsyncOpenAI", _FakeOpenAI)
 
     result = await extraction_service.extract_policy_fields(b"fake-bytes", "application/pdf")
 
@@ -182,7 +182,7 @@ async def test_valid_ai_response_maps_all_fields(monkeypatch):
         "expiry_date": "2025-03-31",
     }
     mock_client = _make_openai_mock(ai_payload)
-    monkeypatch.setattr(extraction_service, "AsyncOpenAI", lambda **kw: mock_client)
+    monkeypatch.setattr("openai.AsyncOpenAI", lambda **kw: mock_client)
 
     result = await extraction_service.extract_policy_fields(b"fake-pdf-bytes", "application/pdf")
 
@@ -218,7 +218,7 @@ async def test_invalid_category_coerced_to_null(monkeypatch):
         "expiry_date": None,
     }
     mock_client = _make_openai_mock(ai_payload)
-    monkeypatch.setattr(extraction_service, "AsyncOpenAI", lambda **kw: mock_client)
+    monkeypatch.setattr("openai.AsyncOpenAI", lambda **kw: mock_client)
 
     result = await extraction_service.extract_policy_fields(b"fake-pdf-bytes", "application/pdf")
 
@@ -238,7 +238,7 @@ async def test_malformed_ai_json_returns_nulls_with_note(monkeypatch):
     monkeypatch.setattr(extraction_service.settings, "svault_ai_api_key", "test-key")
 
     mock_client = _make_openai_mock("This is not valid JSON {{ broken }}")
-    monkeypatch.setattr(extraction_service, "AsyncOpenAI", lambda **kw: mock_client)
+    monkeypatch.setattr("openai.AsyncOpenAI", lambda **kw: mock_client)
 
     result = await extraction_service.extract_policy_fields(b"fake-pdf-bytes", "application/pdf")
 
