@@ -5,15 +5,17 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authz import require_permission
+from app.core.config import settings
 from app.core.security import CurrentUser
 from app.db.session import get_db
 from app.schemas.document import (
+    AutoProcessResponse,
     DocumentWithUrl,
     RecordDocumentRequest,
     UploadUrlRequest,
     UploadUrlResponse,
 )
-from app.services import document_service
+from app.services import document_service, secrets_service
 
 router = APIRouter(tags=["documents"])
 
@@ -48,6 +50,32 @@ async def record_document(
         size_bytes=doc.size_bytes, version=doc.version, created_at=doc.created_at,
         download_url=url,
     )
+
+
+@router.post(
+    "/policies/{policy_id}/documents/{document_id}/auto-extract",
+    response_model=AutoProcessResponse,
+)
+async def auto_extract_document(
+    policy_id: uuid.UUID,
+    document_id: uuid.UUID,
+    user: CurrentUser = Depends(_write),
+    db: AsyncSession = Depends(get_db),
+) -> AutoProcessResponse:
+    """Auto-process a freshly uploaded document (best-effort).
+
+    Indexes the document for Ask sVault, AI-extracts policy fields from text PDFs,
+    and auto-fills the policy's expiry date (if missing) so renewal alerts schedule
+    themselves. The frontend calls this automatically right after recording a document.
+    Never fails on AI/index errors — those are reported in ``notes``.
+    """
+    ai_key = await secrets_service.get_secret(
+        db, "svault_ai_api_key", settings.svault_ai_api_key
+    )
+    result = await document_service.auto_process_document(
+        db, user, policy_id, document_id, ai_key=ai_key
+    )
+    return AutoProcessResponse(**result)
 
 
 @router.get("/policies/{policy_id}/documents", response_model=list[DocumentWithUrl])

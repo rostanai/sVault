@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.intake import PolicyExtraction
+
 DocType = Literal["policy", "schedule", "endorsement", "invoice", "claim", "other"]
 
 
@@ -42,6 +44,22 @@ class DocumentRead(BaseModel):
 
 class DocumentWithUrl(DocumentRead):
     download_url: str
+
+
+class AutoProcessResponse(BaseModel):
+    """Result of auto-processing a freshly uploaded document.
+
+    Best-effort: the document is indexed for Ask sVault (``indexed_chunks``) and,
+    for text-based PDFs, sVault AI extracts policy fields (``extracted``). When an
+    expiry date is found and the policy had none, it is applied so the renewal-alert
+    cadence starts automatically (``expiry_applied``). Images/scanned PDFs yield
+    ``indexed_chunks=0`` and a ``notes`` hint (OCR not yet supported).
+    """
+
+    indexed_chunks: int = 0
+    expiry_applied: bool = False
+    extracted: PolicyExtraction | None = None
+    notes: str | None = None
 
 
 class DocumentLibraryItem(BaseModel):
