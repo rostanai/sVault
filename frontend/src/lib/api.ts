@@ -1340,3 +1340,97 @@ export const sendDigestNow = (token: string) =>
     "/digests/send-me",
     { method: "POST", token }
   );
+
+// ── Claims ───────────────────────────────────────────────────────────────────
+
+export type ClaimStatus =
+  | "draft"
+  | "reported"
+  | "under_review"
+  | "approved"
+  | "rejected"
+  | "settled"
+  | "closed";
+
+export interface ClaimRead {
+  id: string;
+  policy_id: string;
+  org_id: string;
+  claim_number: string | null;
+  status: string;
+  claim_amount_inr: string | null;
+  approved_amount_inr: string | null;
+  incident_date: string | null;
+  reported_date: string | null;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  policy_title: string | null;
+}
+
+export interface ClaimEvent {
+  id: string;
+  claim_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ClaimCreate {
+  policy_id: string;
+  claim_number?: string;
+  status?: ClaimStatus;
+  claim_amount_inr?: string;
+  incident_date?: string;
+  description?: string;
+}
+
+export interface ClaimUpdate {
+  status?: ClaimStatus;
+  claim_number?: string;
+  claim_amount_inr?: string;
+  approved_amount_inr?: string;
+  incident_date?: string;
+  description?: string;
+  note?: string;
+}
+
+export const getClaims = (
+  token: string,
+  params?: { status?: ClaimStatus; policy_id?: string; limit?: number; offset?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.policy_id) qs.set("policy_id", params.policy_id);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<ClaimRead[]>(`/claims${query}`, { token });
+};
+
+export const getClaim = (token: string, claimId: string) =>
+  apiFetch<ClaimRead>(`/claims/${claimId}`, { token });
+
+export const createClaim = (token: string, body: ClaimCreate) =>
+  apiFetch<ClaimRead>("/claims", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const updateClaim = (token: string, claimId: string, body: ClaimUpdate) =>
+  apiFetch<ClaimRead>(`/claims/${claimId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const getClaimEvents = (token: string, claimId: string) =>
+  apiFetch<ClaimEvent[]>(`/claims/${claimId}/events`, { token });
+
+export const getPolicyClaims = (token: string, policyId: string) =>
+  apiFetch<ClaimRead[]>(`/policies/${policyId}/claims`, { token });
