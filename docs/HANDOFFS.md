@@ -454,3 +454,19 @@
   - devops-engineer: set `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `SMS_API_KEY`, `SMS_DLT_TEMPLATE_ID`, `SMS_SENDER_ID`, `TELEGRAM_BOT_TOKEN`, `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS` in Vercel env for live mode.
   - Telegram opt-in flow (bot `/start` → store `chat_id`) needs a UI and a Profile field update.
   - Escalation (owner → manager → admin if unacknowledged) is tracked in `AlertRule.escalate` but the escalation scan is not yet implemented; planned for next iteration.
+
+### 2026-05-31 — billing-engineer — fix subscription upgrade flow (simulated-activation branch)
+
+- Did: Fixed the upgrade flow so it actually takes effect when Razorpay is not fully configured (seeded plans, no razorpay_plan_id, or no razorpay_key_id).
+- Root cause: `start_or_update_subscription` silently skipped Razorpay when `plan.razorpay_plan_id` was NULL but did NOT set `status='active'` locally — leaving the subscription in `trialing`/`pending` forever with no checkout URL and no entitlement change.
+- Branches implemented:
+  - Branch 1 (real payment): `settings.razorpay_key_id` AND `plan.razorpay_plan_id` both set → calls Razorpay API, stores `trialing`, returns `payment_required=True` + `short_url`. Webhook sets `active`.
+  - Branch 2 (simulated/demo): either key is empty OR plan has no `razorpay_plan_id` → sets `status='active'` immediately (safe: no live payment processor), returns `payment_required=False`, `razorpay_subscription_id=None`, `short_url=None`. Entitlements resolve from `active` + `plan.entitlements` immediately.
+- Schema change: added `payment_required: bool = False` to `SubscribeResponse` in `app/schemas/billing.py`. Frontend uses this to decide whether to open Razorpay checkout or simply refresh.
+- Files touched:
+  - `backend/app/services/subscription_service.py` — rewrote `start_or_update_subscription`, updated module docstring.
+  - `backend/app/schemas/billing.py` — added `payment_required` field to `SubscribeResponse`.
+  - `backend/tests/test_m5_billing.py` — replaced `TestSubscribeNeverGrantsActiveStatus` with `TestSubscribeNeverGrantsActiveStatusInRealMode` + added `TestSubscribeSimulatedMode` (4 new tests: real-mode keeps trialing, simulated no-key activates, simulated no-plan-id activates, upgrade existing sub activates).
+- router.py: NOT touched. The endpoint maps `**result` into `SubscribeResponse(**result)` — the new `payment_required` key flows through automatically.
+- ruff: all checks passed. pytest: 189 passed (was 186; 3 new tests added), 0 failed.
+- Handoff to: ui-ux-designer / frontend to read `payment_required` from `POST /billing/subscribe` and skip checkout when False.
