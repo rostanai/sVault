@@ -30,6 +30,7 @@ export default async function AppLayout({
   let subscriptionStatus: string = "free";
   let trialDaysLeft: number | null = null;
   let isSuperAdmin: boolean = false;
+  let token: string = "";
 
   try {
     const {
@@ -37,7 +38,7 @@ export default async function AppLayout({
     } = await supabase.auth.getSession();
 
     if (session?.access_token) {
-      const token = session.access_token;
+      token = session.access_token;
       const [subData, plans, meData] = await Promise.all([
         getSubscription(token),
         getPlans(token),
@@ -81,6 +82,7 @@ export default async function AppLayout({
       subscriptionStatus={subscriptionStatus}
       trialDaysLeft={trialDaysLeft}
       isSuperAdmin={isSuperAdmin}
+      token={token}
     >
       {children}
     </AppShell>

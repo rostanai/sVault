@@ -9,12 +9,14 @@ from app.api.v1 import (
     auth,
     billing,
     dashboard,
+    document_library,
     documents,
     exports,
     health,
     imports,
     intake,
     invitations,
+    notifications,
     orgs,
     platform,
     policies,
@@ -46,3 +48,5 @@ api_router.include_router(public.router)        # M7 public developer API (API-k
 api_router.include_router(exports.router)       # policy + renewal export (CSV/XLSX)
 api_router.include_router(imports.router)       # bulk policy import (CSV/XLSX)
 api_router.include_router(reports.router)       # renewal report (JSON)
+api_router.include_router(document_library.router)  # document library (cross-policy)
+api_router.include_router(notifications.router)     # in-app notification feed

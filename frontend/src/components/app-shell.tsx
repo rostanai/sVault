@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -31,9 +31,15 @@ import {
   User,
   Zap,
   ShieldCheck,
+  Paperclip,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import {
+  getNotifications,
+  type NotificationFeed,
+  type NotificationItem,
+} from "@/lib/api";
 
 interface NavItem {
   label: string;
@@ -44,6 +50,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard },
   { label: "Policies", href: "/app/policies", icon: FileText },
+  { label: "Documents", href: "/app/documents", icon: Paperclip },
   { label: "Providers", href: "/app/providers", icon: Building2 },
   { label: "Ask sVault", href: "/app/ask", icon: Sparkles },
   { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
@@ -62,6 +69,7 @@ interface AppShellProps {
   subscriptionStatus?: string;
   trialDaysLeft?: number | null;
   isSuperAdmin?: boolean;
+  token?: string;
 }
 
 export default function AppShell({
@@ -73,10 +81,39 @@ export default function AppShell({
   subscriptionStatus = "free",
   trialDaysLeft = null,
   isSuperAdmin = false,
+  token = "",
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Notification state
+  const emptyFeed: NotificationFeed = { unread_count: 0, items: [] };
+  const [notifFeed, setNotifFeed] = useState<NotificationFeed>(emptyFeed);
+
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+
+    async function fetchFeed() {
+      try {
+        const feed = await getNotifications(token);
+        if (!cancelled && feed) {
+          setNotifFeed(feed);
+        }
+      } catch {
+        // Degrade silently — bell shows 0/empty
+      }
+    }
+
+    fetchFeed();
+    const intervalId = setInterval(fetchFeed, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [token]);
 
   const initials = name
     .split(" ")
@@ -91,6 +128,13 @@ export default function AppShell({
     await supabase.auth.signOut();
     toast.success("Signed out");
     router.push("/login");
+  }
+
+  // Map notification type to icon component
+  function notifIcon(type: NotificationItem["type"]): React.ElementType {
+    if (type === "alert") return Bell;
+    if (type === "approval") return CheckSquare;
+    return Sparkles;
   }
 
   // Determine plan badge variant and CTA label.
@@ -245,52 +289,134 @@ export default function AppShell({
           {/* Spacer for desktop */}
           <div className="hidden lg:block" />
 
-          {/* User menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="flex items-center gap-2 px-2"
-                aria-label="User menu"
-              >
-                <Avatar className="h-7 w-7">
-                  {avatarUrl && (
-                    <AvatarImage src={avatarUrl} alt={name} />
+          {/* Right-side controls */}
+          <div className="flex items-center gap-1">
+            {/* Notification bell */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative"
+                  aria-label="Notifications"
+                >
+                  <Bell className="h-5 w-5" />
+                  {notifFeed.unread_count > 0 && (
+                    <span
+                      className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold leading-none text-white"
+                      aria-label={`${notifFeed.unread_count} unread`}
+                    >
+                      {notifFeed.unread_count > 99
+                        ? "99+"
+                        : notifFeed.unread_count}
+                    </span>
                   )}
-                  <AvatarFallback>{initials}</AvatarFallback>
-                </Avatar>
-                <span className="hidden max-w-[160px] truncate text-sm sm:block">
-                  {name}
-                </span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{name}</p>
-                  <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-                    {email}
-                  </p>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/app/settings" className="cursor-pointer">
-                  <User className="mr-2 h-4 w-4" />
-                  Settings
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleSignOut}
-                className="cursor-pointer text-red-600 focus:text-red-600 dark:text-red-400"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel className="flex items-center justify-between">
+                  <span>Notifications</span>
+                  {notifFeed.unread_count > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {notifFeed.unread_count} unread
+                    </Badge>
+                  )}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {notifFeed.items.length === 0 ? (
+                  <div className="px-3 py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                    You&apos;re all caught up.
+                  </div>
+                ) : (
+                  notifFeed.items.slice(0, 8).map((item) => {
+                    const NotifIcon = notifIcon(item.type);
+                    return (
+                      <DropdownMenuItem key={item.id} asChild>
+                        <Link
+                          href={item.href}
+                          className="flex items-start gap-3 py-2.5"
+                        >
+                          <NotifIcon
+                            className="mt-0.5 h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400"
+                            aria-hidden="true"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium leading-tight">
+                              {item.title}
+                            </p>
+                            {item.subtitle && (
+                              <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                                {item.subtitle}
+                              </p>
+                            )}
+                            <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
+                              {formatDate(item.created_at)}
+                            </p>
+                          </div>
+                        </Link>
+                      </DropdownMenuItem>
+                    );
+                  })
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link
+                    href="/app/alerts"
+                    className="justify-center text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                  >
+                    View all alerts
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* User menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex items-center gap-2 px-2"
+                  aria-label="User menu"
+                >
+                  <Avatar className="h-7 w-7">
+                    {avatarUrl && (
+                      <AvatarImage src={avatarUrl} alt={name} />
+                    )}
+                    <AvatarFallback>{initials}</AvatarFallback>
+                  </Avatar>
+                  <span className="hidden max-w-[160px] truncate text-sm sm:block">
+                    {name}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{name}</p>
+                    <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                      {email}
+                    </p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/app/settings" className="cursor-pointer">
+                    <User className="mr-2 h-4 w-4" />
+                    Settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleSignOut}
+                  className="cursor-pointer text-red-600 focus:text-red-600 dark:text-red-400"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
 
         {/* Page content */}

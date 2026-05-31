@@ -143,6 +143,61 @@ async def subscribe(
     return SubscribeResponse(**result)
 
 
+@router.post("/billing/cancel", response_model=SubscriptionRead)
+async def cancel_subscription(
+    user: CurrentUser = Depends(_billing_manage),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionRead:
+    """Cancel the tenant's subscription.
+
+    Requires billing:manage permission.
+    If Razorpay is configured and the subscription has a Razorpay subscription id,
+    the cancellation is requested at cycle end (best-effort Razorpay API call) and
+    cancel_at_period_end is set; the webhook will flip status to 'cancelled'.
+    In demo / no-Razorpay mode the subscription is cancelled immediately and
+    entitlements fall back to Free defaults.
+    """
+    if not user.tenant_id:
+        raise AppError(ErrorCode.unauthorized, "No tenant context")
+    sub = await subscription_service.cancel_subscription(db, user.tenant_id)
+    return SubscriptionRead.model_validate(sub)
+
+
+@router.post("/billing/pause", response_model=SubscriptionRead)
+async def pause_subscription(
+    user: CurrentUser = Depends(_billing_manage),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionRead:
+    """Pause the tenant's subscription.
+
+    Requires billing:manage permission.
+    Sets status='paused'; entitlements fall back to Free defaults per PLANS.md.
+    Returns 404 if the tenant has no subscription.
+    """
+    if not user.tenant_id:
+        raise AppError(ErrorCode.unauthorized, "No tenant context")
+    sub = await subscription_service.pause_subscription(db, user.tenant_id)
+    return SubscriptionRead.model_validate(sub)
+
+
+@router.post("/billing/resume", response_model=SubscriptionRead)
+async def resume_subscription(
+    user: CurrentUser = Depends(_billing_manage),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionRead:
+    """Undo a pending cancel or reactivate a paused / cancelled subscription.
+
+    Requires billing:manage permission.
+    Clears cancel_at_period_end; restores status to 'active' when currently
+    'cancelled' or 'paused' (demo mode).  plan_id is preserved.
+    Returns 404 if the tenant has no subscription.
+    """
+    if not user.tenant_id:
+        raise AppError(ErrorCode.unauthorized, "No tenant context")
+    sub = await subscription_service.resume_subscription(db, user.tenant_id)
+    return SubscriptionRead.model_validate(sub)
+
+
 @router.post("/billing/webhook", status_code=200)
 async def razorpay_webhook(
     raw_body: bytes = Depends(_sig_check),
