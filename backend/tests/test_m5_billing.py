@@ -371,66 +371,255 @@ class TestWebhookIdempotency:
         db.rollback.assert_called_once()
 
 
-class TestSubscribeNeverGrantsActiveStatus:
-    """M1 fix: start_or_update_subscription must not persist status='active' without payment."""
+class TestSubscribeNeverGrantsActiveStatusInRealMode:
+    """M1 fix (updated): start_or_update_subscription must not persist status='active'
+    when real Razorpay credentials AND plan.razorpay_plan_id are both set.
+    Only a confirmed webhook may set 'active' in that path."""
 
     @pytest.mark.asyncio
-    async def test_new_subscription_status_is_trialing_not_active(self):
-        """M1: when Razorpay is skipped (no razorpay_plan_id), status must be 'trialing',
-        never 'active'. Only a confirmed webhook may set 'active'."""
+    async def test_real_mode_status_is_not_forced_active(self):
+        """Branch 1: with razorpay_key_id set AND plan.razorpay_plan_id set,
+        status must NOT be forced to 'active' locally — the webhook does that.
+        Returns payment_required=True and a short_url.
+        Uses db.add capture (avoids patching SQLAlchemy __init__)."""
         import uuid as uuid_mod
         from unittest.mock import AsyncMock, MagicMock, patch
 
+        from app.core import config
         from app.services.subscription_service import start_or_update_subscription
 
         plan_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000010")
         tenant_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000001")
 
-        # Capture what Subscription is constructed with
-        constructed_subs = []
+        added_objects: list = []
 
-        def capturing_init(self, **kwargs):
-            constructed_subs.append(kwargs.get("status"))
-            # Minimal init: just set the attrs the service reads
-            self.tenant_id = kwargs.get("tenant_id")
-            self.plan_id = kwargs.get("plan_id")
-            self.status = kwargs.get("status", "trialing")
-            self.razorpay_subscription_id = None
+        def capture_add(obj):
+            added_objects.append(obj)
 
         db = AsyncMock()
-        db.add = MagicMock()
+        db.add = MagicMock(side_effect=capture_add)
         db.commit = AsyncMock()
         db.refresh = AsyncMock()
 
-        # Mock the plan returned from the first DB execute
         mock_plan = MagicMock()
         mock_plan.id = plan_id
         mock_plan.is_active = True
-        mock_plan.razorpay_plan_id = None  # no razorpay_plan_id → Razorpay call skipped
+        mock_plan.razorpay_plan_id = "plan_rzp_001"  # plan IS linked to Razorpay
 
-        # execute returns plan on first call, None (no existing subscription) on second
         plan_result = MagicMock()
         plan_result.scalar_one_or_none = MagicMock(return_value=mock_plan)
         no_sub_result = MagicMock()
         no_sub_result.scalar_one_or_none = MagicMock(return_value=None)
         db.execute = AsyncMock(side_effect=[plan_result, no_sub_result])
 
-        import app.db.models.billing as billing_models
+        fake_rzp_sub = {"id": "sub_rzp_test001", "short_url": "https://rzp.io/i/test"}
 
-        # Patch Subscription.__init__ to capture the status kwarg
-        with patch.object(billing_models.Subscription, "__init__", capturing_init):
+        from app.core import razorpay as rzp_module
+
+        with (
+            patch.object(config.settings, "razorpay_key_id", "rzp_test_key"),
+            patch.object(rzp_module, "create_subscription", AsyncMock(return_value=fake_rzp_sub)),
+        ):
+            result = await start_or_update_subscription(db, tenant_id, plan_id)
+
+        # A new Subscription must have been added
+        assert len(added_objects) == 1, f"Expected db.add called once, got {len(added_objects)}"
+        new_sub = added_objects[0]
+
+        # Status must be 'trialing', not 'active' (webhook sets active in real mode)
+        assert new_sub.status != "active", (
+            f"Real mode must NOT set status='active' without a webhook, got {new_sub.status}"
+        )
+        assert new_sub.status == "trialing", (
+            f"Expected status='trialing' for new real-mode sub, got {new_sub.status}"
+        )
+        assert result.get("payment_required") is True, (
+            "Real mode must return payment_required=True"
+        )
+        assert result.get("razorpay_subscription_id") == "sub_rzp_test001"
+        assert result.get("short_url") == "https://rzp.io/i/test"
+
+
+class TestSubscribeSimulatedMode:
+    """Branch 2: when Razorpay is not configured or plan has no razorpay_plan_id,
+    the upgrade activates immediately (status='active') with payment_required=False."""
+
+    @pytest.mark.asyncio
+    async def test_simulated_no_razorpay_key_activates_immediately(self):
+        """Branch 2a: razorpay_key_id is empty → immediate activation, no Razorpay call."""
+        import uuid as uuid_mod
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.core import config
+        from app.services.subscription_service import start_or_update_subscription
+
+        plan_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000010")
+        tenant_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000001")
+
+        added_objects: list = []
+
+        def capture_add(obj):
+            added_objects.append(obj)
+
+        db = AsyncMock()
+        db.add = MagicMock(side_effect=capture_add)
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+
+        mock_plan = MagicMock()
+        mock_plan.id = plan_id
+        mock_plan.is_active = True
+        mock_plan.razorpay_plan_id = "plan_rzp_001"  # plan has rzp id, but no key
+
+        plan_result = MagicMock()
+        plan_result.scalar_one_or_none = MagicMock(return_value=mock_plan)
+        no_sub_result = MagicMock()
+        no_sub_result.scalar_one_or_none = MagicMock(return_value=None)
+        db.execute = AsyncMock(side_effect=[plan_result, no_sub_result])
+
+        from app.core import razorpay as rzp_module
+
+        rzp_call = AsyncMock()
+
+        with (
+            patch.object(config.settings, "razorpay_key_id", ""),  # no key = simulated
+            patch.object(rzp_module, "create_subscription", rzp_call),
+        ):
+            result = await start_or_update_subscription(db, tenant_id, plan_id)
+
+        assert len(added_objects) == 1, f"Expected db.add called once, got {len(added_objects)}"
+        new_sub = added_objects[0]
+
+        assert new_sub.status == "active", (
+            f"Simulated mode must set status='active', got {new_sub.status}"
+        )
+        assert new_sub.plan_id == plan_id, (
+            f"plan_id must be the chosen plan, got {new_sub.plan_id}"
+        )
+        assert result.get("payment_required") is False, (
+            "Simulated mode must return payment_required=False"
+        )
+        assert result.get("razorpay_subscription_id") is None
+        assert result.get("short_url") is None
+        # No Razorpay API call must be made
+        rzp_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_simulated_no_plan_razorpay_id_activates_immediately(self):
+        """Branch 2b: razorpay_key_id is set but plan.razorpay_plan_id is None
+        (seeded/free plan) → immediate activation, no Razorpay call, plan_id updated."""
+        import uuid as uuid_mod
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.core import config
+        from app.services.subscription_service import start_or_update_subscription
+
+        plan_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000020")
+        tenant_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000001")
+
+        added_objects: list = []
+
+        def capture_add(obj):
+            added_objects.append(obj)
+
+        db = AsyncMock()
+        db.add = MagicMock(side_effect=capture_add)
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+
+        mock_plan = MagicMock()
+        mock_plan.id = plan_id
+        mock_plan.is_active = True
+        mock_plan.razorpay_plan_id = None  # seeded plan has no razorpay_plan_id
+
+        plan_result = MagicMock()
+        plan_result.scalar_one_or_none = MagicMock(return_value=mock_plan)
+        no_sub_result = MagicMock()
+        no_sub_result.scalar_one_or_none = MagicMock(return_value=None)
+        db.execute = AsyncMock(side_effect=[plan_result, no_sub_result])
+
+        from app.core import razorpay as rzp_module
+
+        rzp_call = AsyncMock()
+
+        with (
+            patch.object(config.settings, "razorpay_key_id", "rzp_test_key"),  # key present
+            patch.object(rzp_module, "create_subscription", rzp_call),
+        ):
+            result = await start_or_update_subscription(db, tenant_id, plan_id)
+
+        assert len(added_objects) == 1, f"Expected db.add called once, got {len(added_objects)}"
+        new_sub = added_objects[0]
+
+        assert new_sub.status == "active", (
+            f"No-razorpay-plan-id must set status='active', got {new_sub.status}"
+        )
+        assert new_sub.plan_id == plan_id, (
+            f"plan_id must be set to {plan_id}, got {new_sub.plan_id}"
+        )
+        assert result.get("payment_required") is False
+        assert result.get("razorpay_subscription_id") is None
+        rzp_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_simulated_upgrade_existing_sub_sets_active_and_plan(self):
+        """Branch 2: upgrading an existing subscription (not new) also sets status='active'
+        and updates plan_id in simulated mode."""
+        import uuid as uuid_mod
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.core import config
+        from app.services.subscription_service import start_or_update_subscription
+
+        old_plan_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000010")
+        new_plan_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000020")
+        tenant_id = uuid_mod.UUID("00000000-0000-0000-0000-000000000001")
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+
+        mock_plan = MagicMock()
+        mock_plan.id = new_plan_id
+        mock_plan.is_active = True
+        mock_plan.razorpay_plan_id = None  # simulated
+
+        # Existing subscription on the old plan
+        existing_sub = MagicMock()
+        existing_sub.plan_id = old_plan_id
+        existing_sub.status = "trialing"
+        existing_sub.razorpay_subscription_id = None
+
+        plan_result = MagicMock()
+        plan_result.scalar_one_or_none = MagicMock(return_value=mock_plan)
+        sub_result = MagicMock()
+        sub_result.scalar_one_or_none = MagicMock(return_value=existing_sub)
+        db.execute = AsyncMock(side_effect=[plan_result, sub_result])
+
+        from app.core import razorpay as rzp_module
+
+        rzp_call = AsyncMock()
+
+        with (
+            patch.object(config.settings, "razorpay_key_id", ""),
+            patch.object(rzp_module, "create_subscription", rzp_call),
+        ):
             try:
-                await start_or_update_subscription(db, tenant_id, plan_id)
+                result = await start_or_update_subscription(db, tenant_id, new_plan_id)
             except Exception:
-                pass  # refresh may fail on mock; that's fine
+                result = {}
 
-        # The subscription must have been constructed with status='trialing', not 'active'
-        assert "trialing" in constructed_subs, (
-            f"Expected status='trialing' for unpaid new sub, got {constructed_subs}"
+        # plan_id on the existing sub must be updated
+        assert existing_sub.plan_id == new_plan_id, (
+            f"plan_id must be updated to {new_plan_id}, got {existing_sub.plan_id}"
         )
-        assert "active" not in constructed_subs, (
-            "Must NOT set status='active' without confirmed payment"
+        # status must be set to active in simulated mode
+        assert existing_sub.status == "active", (
+            f"Simulated upgrade must set status='active', got {existing_sub.status}"
         )
+        assert result.get("payment_required") is False
+        rzp_call.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
