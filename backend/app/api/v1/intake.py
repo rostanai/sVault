@@ -12,12 +12,15 @@ Plan: no entitlement gate (extraction is a creation assist, not a separate featu
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authz import require_permission
+from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.security import CurrentUser
+from app.db.session import get_db
 from app.schemas.intake import PolicyExtraction
-from app.services import extraction_service
+from app.services import extraction_service, secrets_service
 
 router = APIRouter(tags=["intake"])
 
@@ -39,6 +42,7 @@ _MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
 async def extract_policy(
     file: UploadFile = _pdf_file,
     user: CurrentUser = Depends(_can_create),
+    db: AsyncSession = Depends(get_db),
 ) -> PolicyExtraction:
     """Upload a policy PDF and receive AI-extracted structured fields for review.
 
@@ -57,5 +61,10 @@ async def extract_policy(
             f"File exceeds the 20 MB limit (received {len(raw) // (1024 * 1024)} MB).",
         )
 
-    result = await extraction_service.extract_policy_fields(raw, file.content_type)
+    api_key = await secrets_service.get_secret(
+        db, "svault_ai_api_key", settings.svault_ai_api_key
+    )
+    result = await extraction_service.extract_policy_fields(
+        raw, file.content_type, api_key=api_key
+    )
     return PolicyExtraction(**result)
