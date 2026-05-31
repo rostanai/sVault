@@ -1341,7 +1341,7 @@ export const sendDigestNow = (token: string) =>
     { method: "POST", token }
   );
 
-// ── Claims ───────────────────────────────────────────────────────────────────
+// ── Claims ──────────────────────────────────────────────────────────────────────
 
 export type ClaimStatus =
   | "draft"
