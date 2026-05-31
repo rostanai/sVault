@@ -1,8 +1,11 @@
 """Policy document service — signed-URL upload flow + metadata, scope-checked."""
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import date
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +15,8 @@ from app.core.security import CurrentUser
 from app.db.models import PolicyDocument
 from app.schemas.document import RecordDocumentRequest, UploadUrlRequest
 from app.services import policy_service
+
+log = logging.getLogger("svault.documents")
 
 
 async def request_upload_url(
@@ -73,6 +78,81 @@ async def list_documents(
             "mime_type": d.mime_type, "size_bytes": d.size_bytes, "version": d.version,
             "created_at": d.created_at, "download_url": url,
         })
+    return out
+
+
+async def auto_process_document(
+    db: AsyncSession,
+    user: CurrentUser,
+    policy_id: uuid.UUID,
+    document_id: uuid.UUID,
+    *,
+    ai_key: str | None,
+) -> dict:
+    """Best-effort post-upload processing of a document.
+
+    1. Index the document for "Ask sVault" (text PDFs → searchable chunks).
+    2. AI-extract structured policy fields (text PDFs only).
+    3. If an expiry date is found and the policy had none, apply it so the
+       renewal-alert cadence (60/30/15/7/1d) starts automatically.
+
+    Never raises on AI/index/network failure — those degrade gracefully into the
+    response ``notes`` so a flaky AI call can never break the upload flow. The
+    scope check (404 if the policy/doc isn't the user's) is the only hard error.
+
+    Images and scanned PDFs have no machine-readable text, so they yield
+    ``indexed_chunks=0`` and a notes hint (OCR is a later phase).
+    """
+    # Hard scope check — raises 404 if the policy isn't accessible to this user.
+    policy = await policy_service.get_policy(db, user, policy_id)
+    doc = await db.get(PolicyDocument, document_id)
+    if doc is None or doc.policy_id != policy.id:
+        raise not_found("Document not found")
+
+    out: dict = {
+        "indexed_chunks": 0,
+        "expiry_applied": False,
+        "extracted": None,
+        "notes": None,
+    }
+
+    # 1) Index for Ask sVault (RAG). Lexical full-text — no embeddings provider.
+    from app.services import rag_service
+
+    try:
+        out["indexed_chunks"] = await rag_service.ingest_document(db, user, document_id)
+    except Exception as exc:  # never let indexing failure break the flow
+        log.warning("auto_index_failed | doc=%s | %s", document_id, exc)
+
+    # 2) AI field extraction (text PDFs only).
+    from app.services import extraction_service
+
+    try:
+        url = await storage.create_signed_download_url(doc.storage_path)
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            raw = resp.content
+        result = await extraction_service.extract_policy_fields(raw, doc.mime_type, ai_key)
+        out["extracted"] = result
+        out["notes"] = result.get("notes")
+
+        # 3) Auto-fill a missing expiry date so renewal alerts schedule themselves.
+        expiry = result.get("expiry_date")
+        if expiry and policy.expiry_date is None:
+            try:
+                policy.expiry_date = date.fromisoformat(expiry)
+                await db.commit()
+                out["expiry_applied"] = True
+            except (ValueError, TypeError):
+                pass  # malformed date from the model — ignore, leave policy unchanged
+    except AppError as exc:
+        # sVault AI not configured / unavailable — surface as a soft note.
+        out["notes"] = exc.message if hasattr(exc, "message") else str(exc)
+    except Exception as exc:
+        log.warning("auto_extract_failed | doc=%s | %s", document_id, exc)
+        out["notes"] = "Could not auto-read this document."
+
     return out
 
 
