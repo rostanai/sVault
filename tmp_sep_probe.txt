@@ -1,3 +1,0 @@
-A:// ── Developer API keys ──────────────────────────────────────────────
-B:// ── Super Admin / Platform (super_admin only) ───────────────────────────────────
-C:// ── Alert actions (snooze / mark renewed) ───────────────────────────────────────
