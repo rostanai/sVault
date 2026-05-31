@@ -336,6 +336,121 @@ async def handle_webhook(db: AsyncSession, event_type: str, payload: dict) -> bo
     return True
 
 
+# ---------------------------------------------------------------------------
+# Subscription lifecycle — cancel / pause / resume
+# ---------------------------------------------------------------------------
+
+async def cancel_subscription(db: AsyncSession, tenant_id: str | uuid.UUID) -> Subscription:
+    """Cancel the tenant's subscription.
+
+    Behaviour (matches PLANS.md status transitions):
+    - If Razorpay is configured AND the subscription has a razorpay_subscription_id,
+      attempt to cancel at cycle end via the Razorpay API (best-effort; logged on
+      failure).  Set cancel_at_period_end=True but keep status until the webhook
+      flips it (subscription.cancelled).
+    - Demo / no-Razorpay path (no live keys or no rzp sub id): set status='cancelled'
+      and cancel_at_period_end=True immediately so entitlements fall back to Free.
+
+    Raises AppError(not_found) if the tenant has no subscription.
+    """
+    tid = uuid.UUID(str(tenant_id))
+    sub: Subscription | None = await get_current(db, tid)
+    if sub is None:
+        raise not_found("No subscription found for this tenant")
+
+    razorpay_key_id = await secrets_service.get_secret(
+        db, "razorpay_key_id", settings.razorpay_key_id
+    )
+    use_real_razorpay: bool = bool(razorpay_key_id and sub.razorpay_subscription_id)
+
+    if use_real_razorpay:
+        # Best-effort Razorpay cancel-at-cycle-end call.
+        # Razorpay v1 API: POST /subscriptions/{id}/cancel with {"cancel_at_cycle_end": 1}
+        try:
+            await rzp._post(
+                f"/subscriptions/{sub.razorpay_subscription_id}/cancel",
+                {"cancel_at_cycle_end": 1},
+            )
+            log.info(
+                "razorpay_cancel_at_cycle_end tenant_id=%s rzp_sub=%s",
+                tid, sub.razorpay_subscription_id,
+            )
+        except AppError as exc:
+            # Non-fatal: log and continue — webhook will still cancel eventually.
+            # TODO: surface a dunning notification via notifications-engineer.
+            log.warning(
+                "razorpay_cancel_failed tenant_id=%s rzp_sub=%s err=%s",
+                tid, sub.razorpay_subscription_id, exc.message,
+            )
+        # Keep status as-is; webhook (subscription.cancelled) will set cancelled.
+        sub.cancel_at_period_end = True
+    else:
+        # Demo / no-Razorpay: cancel immediately, entitlements fall to Free.
+        sub.status = "cancelled"
+        sub.cancel_at_period_end = True
+
+    await db.commit()
+    await db.refresh(sub)
+    log.info(
+        "subscription_cancel tenant_id=%s status=%s cancel_at_period_end=%s",
+        tid, sub.status, sub.cancel_at_period_end,
+    )
+    return sub
+
+
+async def pause_subscription(db: AsyncSession, tenant_id: str | uuid.UUID) -> Subscription:
+    """Pause the tenant's subscription.
+
+    Sets status='paused'.  Per PLANS.md the paused state maps to Free entitlements
+    (the 'paused' row is absent from the entitlements table mapping, so the
+    entitlements service falls back to Free defaults).
+
+    Raises AppError(not_found) if the tenant has no subscription.
+    """
+    tid = uuid.UUID(str(tenant_id))
+    sub: Subscription | None = await get_current(db, tid)
+    if sub is None:
+        raise not_found("No subscription found for this tenant")
+
+    sub.status = "paused"
+
+    await db.commit()
+    await db.refresh(sub)
+    log.info("subscription_pause tenant_id=%s", tid)
+    return sub
+
+
+async def resume_subscription(db: AsyncSession, tenant_id: str | uuid.UUID) -> Subscription:
+    """Undo a pending cancel or reactivate a paused/cancelled subscription.
+
+    Behaviour:
+    - Always clears cancel_at_period_end = False.
+    - If status is 'cancelled' or 'paused', restores it to 'active' (demo / no-live-
+      Razorpay path, mirrors the demo-activation branch in start_or_update_subscription).
+      In production, the webhook drives status; resuming while status is still 'active'
+      (i.e. cancel_at_period_end was set) just clears the flag.
+    - plan_id is not changed.
+
+    Raises AppError(not_found) if the tenant has no subscription.
+    """
+    tid = uuid.UUID(str(tenant_id))
+    sub: Subscription | None = await get_current(db, tid)
+    if sub is None:
+        raise not_found("No subscription found for this tenant")
+
+    sub.cancel_at_period_end = False
+    if sub.status in ("cancelled", "paused"):
+        sub.status = "active"
+
+    await db.commit()
+    await db.refresh(sub)
+    log.info(
+        "subscription_resume tenant_id=%s status=%s cancel_at_period_end=%s",
+        tid, sub.status, sub.cancel_at_period_end,
+    )
+    return sub
+
+
 def _epoch_to_dt(ts: int | None, fallback_now: bool = True) -> datetime | None:
     """Convert a Unix epoch (seconds) to an aware UTC datetime.
 
