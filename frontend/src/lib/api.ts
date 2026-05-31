@@ -730,7 +730,7 @@ export async function extractPolicyFromDocument(
   return res.json() as Promise<PolicyExtraction>;
 }
 
-// ── Developer API keys ──────────────────────────────────────────────────────
+// ── Developer API keys ──────────────────────────────────────────────
 
 export interface ApiKeyRead {
   id: string;
