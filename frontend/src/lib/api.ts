@@ -1048,3 +1048,85 @@ export const pauseSubscription = (token: string) =>
 
 export const resumeSubscription = (token: string) =>
   apiFetch<SubscriptionRead>("/billing/resume", { method: "POST", token });
+
+// ── Policy renewal (creates next-year linked policy) ────────────────────────────
+
+export interface RenewPolicyRequest {
+  expiry_date: string; // new term expiry (YYYY-MM-DD)
+  renewal_date?: string;
+  inception_date?: string;
+  premium_inr?: string;
+  gst_inr?: string;
+  sum_insured_inr?: string;
+  policy_number?: string;
+}
+
+/** Renew a policy: marks the old one renewed and creates a linked new-term policy. */
+export const renewPolicy = (
+  token: string,
+  policyId: string,
+  body: RenewPolicyRequest
+) =>
+  apiFetch<PolicyRead>(`/policies/${policyId}/renew`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+// ── Outbound webhooks (developer integration) ───────────────────────────────────
+
+export interface WebhookRead {
+  id: string;
+  url: string;
+  events: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface WebhookCreated extends WebhookRead {
+  secret: string; // shown once on creation
+}
+
+export interface WebhookCreate {
+  url: string;
+  events: string[];
+}
+
+export const getWebhooks = (token: string) =>
+  apiFetch<WebhookRead[]>("/webhooks", { token });
+
+export const createWebhook = (token: string, body: WebhookCreate) =>
+  apiFetch<WebhookCreated>("/webhooks", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const deleteWebhook = (token: string, webhookId: string) =>
+  apiFetch<void>(`/webhooks/${webhookId}`, {
+    method: "DELETE",
+    token,
+    silent: true,
+  });
+
+export const testWebhook = (token: string, webhookId: string) =>
+  apiFetch<{ delivered: boolean; status_code: number | null }>(
+    `/webhooks/${webhookId}/test`,
+    { method: "POST", token }
+  );
+
+// ── Plan usage / limits (metering + gating) ─────────────────────────────────────
+
+export interface UsageMetric {
+  used: number;
+  limit: number; // -1 = unlimited
+}
+
+export interface UsageResponse {
+  plan_tier: string;
+  status: string;
+  usage: Record<string, UsageMetric>; // policies, users, documents, alerts_month
+}
+
+export const getUsage = (token: string) =>
+  apiFetch<UsageResponse>("/billing/usage", { token });
