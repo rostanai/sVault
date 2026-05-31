@@ -15,11 +15,17 @@ import {
   setAlertRule,
   markPolicyRenewed,
   renewPolicy,
+  getInstallments,
+  addInstallment,
+  markInstallmentPaid,
+  deleteInstallment,
   type PolicyRead,
   type DocumentRead,
   type AlertChannel,
   type AlertRuleRead,
   type RenewPolicyRequest,
+  type Installment,
+  type InstallmentCreate,
 } from "@/lib/api";
 import {
   formatDate,
@@ -66,6 +72,9 @@ import {
   Phone,
   Send,
   RotateCw,
+  Plus,
+  IndianRupee,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -540,13 +549,479 @@ export default function PolicyDetailClient({ id, token }: Props) {
       {/* Documents */}
       <DocumentsCard policyId={id} token={token} />
 
+      {/* Premium Installments */}
+      <InstallmentsCard policyId={id} token={token} />
+
       {/* Alert Schedule */}
       <AlertRuleCard policyId={id} token={token} />
     </div>
   );
 }
 
-// Alert Rule card
+// ── Installments card ────────────────────────────────────────────────────────
+
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
+
+function installmentPaymentStatus(
+  installments: Installment[]
+): "none" | "all_paid" | "partial" | "pending" {
+  if (installments.length === 0) return "none";
+  const paid = installments.filter((i) => i.status === "paid").length;
+  if (paid === installments.length) return "all_paid";
+  if (paid > 0) return "partial";
+  return "pending";
+}
+
+function isOverdue(installment: Installment): boolean {
+  return installment.status === "pending" && installment.due_date < TODAY_ISO;
+}
+
+function InstallmentsCard({
+  policyId,
+  token,
+}: {
+  policyId: string;
+  token: string;
+}) {
+  const [installments, setInstallments] = useState<Installment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Add-installment dialog
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState<InstallmentCreate>({
+    amount_inr: "",
+    due_date: "",
+    note: "",
+  });
+  const [amountError, setAmountError] = useState<string | null>(null);
+  const [dueDateError, setDueDateError] = useState<string | null>(null);
+  const [addSubmitting, setAddSubmitting] = useState(false);
+
+  function loadInstallments() {
+    setLoading(true);
+    getInstallments(token, policyId)
+      .then((data) => {
+        // Sort ascending by due_date (API may already do this, but ensure it)
+        const sorted = [...data].sort((a, b) =>
+          a.due_date.localeCompare(b.due_date)
+        );
+        setInstallments(sorted);
+      })
+      .catch((err: Error) => {
+        toast.error("Failed to load installments.", { description: err.message });
+      })
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    if (token) loadInstallments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policyId, token]);
+
+  async function handleMarkPaid(installment: Installment) {
+    setPayingId(installment.id);
+    try {
+      await markInstallmentPaid(token, installment.id);
+      toast.success(`Installment of ${formatINR(installment.amount_inr)} marked as paid.`);
+      loadInstallments();
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setPayingId(null);
+    }
+  }
+
+  async function handleDelete(installment: Installment) {
+    setDeletingId(installment.id);
+    try {
+      await deleteInstallment(token, installment.id);
+      toast.success("Installment deleted.");
+      loadInstallments();
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function openAddDialog() {
+    setAddForm({ amount_inr: "", due_date: "", note: "" });
+    setAmountError(null);
+    setDueDateError(null);
+    setAddOpen(true);
+  }
+
+  async function handleAddSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    let hasError = false;
+
+    const trimmedAmount = addForm.amount_inr.trim();
+    if (!trimmedAmount || isNaN(Number(trimmedAmount)) || Number(trimmedAmount) <= 0) {
+      setAmountError("Enter a valid positive amount.");
+      hasError = true;
+    } else {
+      setAmountError(null);
+    }
+
+    if (!addForm.due_date) {
+      setDueDateError("Due date is required.");
+      hasError = true;
+    } else {
+      setDueDateError(null);
+    }
+
+    if (hasError) return;
+
+    setAddSubmitting(true);
+    try {
+      const payload: InstallmentCreate = {
+        amount_inr: trimmedAmount,
+        due_date: addForm.due_date,
+        ...(addForm.note?.trim() ? { note: addForm.note.trim() } : {}),
+      };
+      await addInstallment(token, policyId, payload);
+      toast.success("Installment added.");
+      setAddOpen(false);
+      loadInstallments();
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setAddSubmitting(false);
+    }
+  }
+
+  // Derived summary figures
+  const totalAmount = installments.reduce(
+    (sum, i) => sum + Number(i.amount_inr || 0),
+    0
+  );
+  const paidAmount = installments
+    .filter((i) => i.status === "paid")
+    .reduce((sum, i) => sum + Number(i.amount_inr || 0), 0);
+  const paymentStatus = installmentPaymentStatus(installments);
+
+  function PaymentStatusBadge() {
+    if (paymentStatus === "none") return null;
+    if (paymentStatus === "all_paid")
+      return <Badge variant="success">Paid</Badge>;
+    if (paymentStatus === "partial")
+      return <Badge variant="warning">Partially paid</Badge>;
+    return <Badge variant="secondary">Pending</Badge>;
+  }
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Wallet className="h-4 w-4 text-brand-600" />
+            Premium Installments
+          </CardTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={openAddDialog}
+            aria-label="Add installment"
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add installment
+          </Button>
+        </CardHeader>
+
+        <CardContent>
+          {loading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-56" />
+              {[1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <Skeleton className="h-8 w-8 rounded" />
+                  <div className="flex-1 space-y-1">
+                    <Skeleton className="h-3 w-32" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="h-7 w-20 rounded" />
+                </div>
+              ))}
+            </div>
+          ) : installments.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <IndianRupee className="mb-2 h-7 w-7 text-zinc-300" />
+              <p className="text-sm text-zinc-500">No installments tracked.</p>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Add one to track premium payments.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Summary line */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  Total:{" "}
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {formatINR(String(totalAmount))}
+                  </span>
+                </span>
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  Paid:{" "}
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {formatINR(String(paidAmount))}
+                  </span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Payment status:
+                  </span>
+                  <PaymentStatusBadge />
+                </span>
+              </div>
+
+              {/* Installment rows */}
+              <ul
+                className="divide-y divide-zinc-100 dark:divide-zinc-800"
+                aria-label="Installment list"
+              >
+                {installments.map((inst) => {
+                  const overdue = isOverdue(inst);
+                  const isPaying = payingId === inst.id;
+                  const isDeleting = deletingId === inst.id;
+                  const busy = isPaying || isDeleting;
+
+                  return (
+                    <li
+                      key={inst.id}
+                      className="flex items-start gap-3 py-3"
+                    >
+                      {/* Amount + status */}
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold">
+                            {formatINR(inst.amount_inr)}
+                          </span>
+                          {inst.status === "paid" ? (
+                            <Badge variant="success" className="text-xs">
+                              <CheckCircle className="mr-1 h-3 w-3" />
+                              Paid
+                            </Badge>
+                          ) : overdue ? (
+                            <Badge
+                              variant="destructive"
+                              className="text-xs"
+                            >
+                              Overdue
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              Pending
+                            </Badge>
+                          )}
+                        </div>
+                        <p
+                          className={cn(
+                            "text-xs",
+                            overdue
+                              ? "text-red-500 dark:text-red-400 font-medium"
+                              : "text-zinc-400"
+                          )}
+                        >
+                          Due {formatDate(inst.due_date)}
+                          {inst.paid_at && (
+                            <> &middot; Paid {formatDate(inst.paid_at)}</>
+                          )}
+                        </p>
+                        {inst.note && (
+                          <p className="text-xs text-zinc-400 italic truncate">
+                            {inst.note}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {inst.status === "pending" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => handleMarkPaid(inst)}
+                            aria-label={`Mark installment of ${formatINR(inst.amount_inr)} as paid`}
+                            className="h-7 px-2 text-xs text-brand-600 border-brand-600/40 hover:bg-brand-600/10 dark:text-brand-400 dark:border-brand-600/40 dark:hover:bg-brand-600/10"
+                          >
+                            {isPaying ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <>
+                                <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                                Mark paid
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => handleDelete(inst)}
+                          aria-label={`Delete installment of ${formatINR(inst.amount_inr)} due ${formatDate(inst.due_date)}`}
+                          className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        >
+                          {isDeleting ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Add installment dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <IndianRupee className="h-4 w-4 text-brand-600" />
+              Add installment
+            </DialogTitle>
+            <DialogDescription>
+              Record a premium installment payment schedule for this policy.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            id="add-installment-form"
+            onSubmit={handleAddSubmit}
+            noValidate
+            className="space-y-4 pt-1"
+          >
+            {/* Amount */}
+            <div className="space-y-1.5">
+              <Label htmlFor="inst-amount" className="text-xs font-medium">
+                Amount (INR){" "}
+                <span className="text-red-500" aria-hidden="true">
+                  *
+                </span>
+              </Label>
+              <Input
+                id="inst-amount"
+                type="number"
+                inputMode="decimal"
+                min="0.01"
+                step="0.01"
+                placeholder="e.g. 25000"
+                value={addForm.amount_inr}
+                onChange={(e) => {
+                  setAmountError(null);
+                  setAddForm((f) => ({ ...f, amount_inr: e.target.value }));
+                }}
+                aria-describedby={amountError ? "inst-amount-error" : undefined}
+                aria-invalid={!!amountError}
+                className={cn(
+                  "h-8 text-sm",
+                  amountError && "border-red-500 focus-visible:ring-red-500"
+                )}
+              />
+              {amountError && (
+                <p id="inst-amount-error" role="alert" className="text-xs text-red-500">
+                  {amountError}
+                </p>
+              )}
+            </div>
+
+            {/* Due date */}
+            <div className="space-y-1.5">
+              <Label htmlFor="inst-due-date" className="text-xs font-medium">
+                Due date{" "}
+                <span className="text-red-500" aria-hidden="true">
+                  *
+                </span>
+              </Label>
+              <Input
+                id="inst-due-date"
+                type="date"
+                required
+                value={addForm.due_date}
+                onChange={(e) => {
+                  setDueDateError(null);
+                  setAddForm((f) => ({ ...f, due_date: e.target.value }));
+                }}
+                aria-describedby={dueDateError ? "inst-due-date-error" : undefined}
+                aria-invalid={!!dueDateError}
+                className={cn(
+                  "h-8 text-sm",
+                  dueDateError && "border-red-500 focus-visible:ring-red-500"
+                )}
+              />
+              {dueDateError && (
+                <p id="inst-due-date-error" role="alert" className="text-xs text-red-500">
+                  {dueDateError}
+                </p>
+              )}
+            </div>
+
+            {/* Note */}
+            <div className="space-y-1.5">
+              <Label htmlFor="inst-note" className="text-xs font-medium">
+                Note{" "}
+                <span className="text-zinc-400 font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="inst-note"
+                type="text"
+                placeholder="e.g. Q1 installment"
+                value={addForm.note ?? ""}
+                onChange={(e) =>
+                  setAddForm((f) => ({ ...f, note: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+          </form>
+
+          <DialogFooter className="flex gap-2 sm:justify-end pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setAddOpen(false)}
+              disabled={addSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="add-installment-form"
+              size="sm"
+              disabled={addSubmitting}
+              className="bg-brand-600 hover:bg-brand-600/90 text-white"
+            >
+              {addSubmitting ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Alert Rule card ───────────────────────────────────────────────────────────
 
 const STANDARD_LEAD_DAYS = [60, 30, 15, 7, 1];
 
