@@ -560,3 +560,51 @@
 **Not touched:** `src/lib/api.ts`, `app-shell.tsx`.
 
 **Handoff to:** tech-lead to wire the `/app/reports` nav entry in app-shell.
+
+### 2026-05-31 — api-engineer — document library + notifications feed
+
+- Did: Implemented two backend features (branch integrate-ai-approvals):
+
+  **Feature 1 — Document Library (`GET /documents`)**
+  - New schema `DocumentLibraryItem` added to `app/schemas/document.py`: `{id, file_name, doc_type, mime_type, size_bytes, created_at, download_url, policy_id, policy_title, policy_category, snippet: str|null}`.
+  - New service `app/services/document_library_service.py`: joins `policy_documents → policies`, tenant+org-scoped (mirrors `policy_service._accessible_org_filter`), optional `doc_type` filter, `limit/offset` pagination. When `search` is provided: (1) file_name + policy.title ILIKE match, (2) `document_chunks` FTS via `to_tsvector @@ plainto_tsquery` with ILIKE fallback, (3) dedupe by doc_id across both result sets, (4) snippet=~160 chars of best-matching chunk for content hits; snippet=null for metadata-only hits. No N+1: chunk search is one query; missing docs for chunk-only hits are fetched in one extra targeted JOIN. Signed download URLs reuse `app.core.storage.create_signed_download_url`.
+  - New endpoint file `app/api/v1/document_library.py`: `GET /documents` with query params `search`, `doc_type`, `limit` (max 200), `offset`. Requires `policy:read` permission. Auth guard, explicit `response_model`, docstring.
+
+  **Feature 2 — Notifications Feed (`GET /notifications`)**
+  - New schemas in `app/schemas/notification.py`: `NotificationItem {id, type, title, subtitle, href, created_at}` and `NotificationFeed {unread_count, items}`.
+  - New service `app/services/notification_feed_service.py`: queries unacknowledged alerts (`status IN scheduled,sent`) + pending approvals in scope (tenant+org), resolves all alert policy titles in a single batched lookup (no N+1), merges and sorts newest-first, caps display at 20 items, caps `unread_count` at 99.
+  - New endpoint file `app/api/v1/notifications.py`: `GET /notifications`, any authenticated user (uses `get_current_user` dep, no specific permission required). Auth guard, explicit `response_model`, docstring.
+
+- Tests:
+  - `tests/test_document_library.py` (6 tests): 401 auth guard, items include policy context, filename search with snippet=null, FTS chunk hit with snippet populated, no-tenant user returns empty, doc_type filter applied.
+  - `tests/test_notifications_feed.py` (7 tests): 401 auth guard, merges alerts+approvals newest-first, unread_count = full total, display cap at 20, unread_count capped at 99, no-tenant returns empty, DB batched 3 times (alerts → approvals → policy titles).
+
+- Results: `ruff check .` — all checks passed. `pytest -q` — **269 passed** (was 243 before; 26 new tests), 0 failed.
+
+- Router include lines (add to `app/api/v1/router.py`):
+  ```python
+  from app.api.v1 import document_library, notifications
+  api_router.include_router(document_library.router)  # document library (cross-policy)
+  api_router.include_router(notifications.router)      # in-app notification feed
+  ```
+
+- Files created:
+  - `backend/app/schemas/notification.py`
+  - `backend/app/services/document_library_service.py`
+  - `backend/app/services/notification_feed_service.py`
+  - `backend/app/api/v1/document_library.py`
+  - `backend/app/api/v1/notifications.py`
+  - `backend/tests/test_document_library.py`
+  - `backend/tests/test_notifications_feed.py`
+
+- Files edited:
+  - `backend/app/schemas/document.py` — added `DocumentLibraryItem`
+
+### 2026-05-31 — billing-engineer — subscription lifecycle endpoints
+- Did: added cancel/pause/resume lifecycle to the billing layer.
+  - `app/services/subscription_service.py`: `cancel_subscription`, `pause_subscription`, `resume_subscription` (each raises `not_found` when no sub exists; cancel has best-effort Razorpay API call for real-Razorpay path, immediate status flip in demo mode; resume clears `cancel_at_period_end` and restores `active` from `cancelled`/`paused`).
+  - `app/api/v1/billing.py`: three new POST routes (`/billing/cancel`, `/billing/pause`, `/billing/resume`) under the existing `billing.router`, all guarded by `_billing_manage`, returning `SubscriptionRead`.
+  - `tests/test_m5_billing.py`: 19 new tests covering demo cancel, real-Razorpay cancel (flag-only), Razorpay API failure resilience, pause, resume-after-cancel, resume-after-pause, clear-flag-on-active, all 404 on missing sub, and 401 auth guards for all three endpoints.
+- Not touched: `app/api/v1/router.py` (billing.router already included).
+- Results: ruff clean (touched files), 262/262 tests pass (up from 243).
+- Coordinates with: notifications-engineer (dunning on pause/cancel), api-engineer (no new gated endpoints needed).
