@@ -113,7 +113,9 @@ def _sanitise_ai_output(raw_json: dict, char_count: int) -> dict:
     return result
 
 
-async def extract_policy_fields(raw: bytes, mime: str | None) -> dict:
+async def extract_policy_fields(
+    raw: bytes, mime: str | None, api_key: str | None = None
+) -> dict:
     """Extract structured policy fields from raw PDF bytes.
 
     Steps:
@@ -122,7 +124,8 @@ async def extract_policy_fields(raw: bytes, mime: str | None) -> dict:
     3. If sVault AI is unconfigured, raise AppError(internal_error).
     4. Otherwise call sVault AI in JSON mode, parse the response, sanitise it.
 
-    Returns a dict matching the ``PolicyExtraction`` schema shape.
+    ``api_key`` lets the caller pass a key resolved from platform_settings; falls
+    back to the env-configured key. Returns a dict matching ``PolicyExtraction``.
     Raises ``AppError`` on configuration or upstream failures.
     """
     text_content = _extract_text(raw, mime)
@@ -131,7 +134,8 @@ async def extract_policy_fields(raw: bytes, mime: str | None) -> dict:
     if not text_content.strip():
         return _null_result(char_count=0, notes=_SCANNED_NOTES)
 
-    if not settings.svault_ai_api_key:
+    resolved_key = api_key or settings.svault_ai_api_key
+    if not resolved_key:
         raise AppError(ErrorCode.internal_error, "sVault AI is not configured")
 
     # Cap text forwarded to the AI to control token spend.
@@ -142,7 +146,7 @@ async def extract_policy_fields(raw: bytes, mime: str | None) -> dict:
 
     try:
         client = AsyncOpenAI(
-            api_key=settings.svault_ai_api_key,
+            api_key=resolved_key,
             base_url=settings.svault_ai_base_url,
         )
         resp = await client.chat.completions.create(
