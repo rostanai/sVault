@@ -59,6 +59,24 @@ async def submit(
     db.add(approval)
     await db.commit()
     await db.refresh(approval)
+
+    # Fire webhook event — best-effort; never block/fail the caller.
+    try:
+        from app.services import webhook_service  # lazy import avoids potential cycles
+
+        await webhook_service.deliver(
+            db,
+            uuid.UUID(user.tenant_id),
+            "approval.pending",
+            {
+                "approval_id": str(approval.id),
+                "action_type": approval.action_type,
+                "entity_type": approval.entity_type,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     return approval
 
 
