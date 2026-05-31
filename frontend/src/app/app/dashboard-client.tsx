@@ -201,7 +201,7 @@ export default function DashboardClient({ token }: Props) {
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function StatCard({
   title,

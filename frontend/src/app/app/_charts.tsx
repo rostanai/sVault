@@ -8,7 +8,7 @@
 import { categorylabel, statusLabel } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-// ── Types ────────────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────────────────────────
 
 interface CategoryEntry {
   category: string;
@@ -25,7 +25,7 @@ interface ExpiringCounts {
   next_90: number;
 }
 
-// ── Color helpers ──────────────────────────────────────────────
+// ── Color helpers ──────────────────────────────────────────────────────────────
 
 /** Returns Tailwind bg class for a policy status key */
 function statusColorClass(status: string): string {
@@ -71,7 +71,7 @@ function statusHexColor(status: string): string {
   }
 }
 
-// ── 1. Policies by Category — Horizontal Bar Chart ─────────────────────────
+// ── 1. Policies by Category — Horizontal Bar Chart ────────────────────────────
 
 export function CategoryBarChart({ data }: { data: CategoryEntry[] }) {
   const hasData = data.length > 0 && data.some((d) => d.count > 0);
@@ -126,7 +126,7 @@ export function CategoryBarChart({ data }: { data: CategoryEntry[] }) {
   );
 }
 
-// ── 2. Status Breakdown — SVG Donut Chart ────────────────────────────────
+// ── 2. Status Breakdown — SVG Donut Chart ─────────────────────────────────────
 
 const DONUT_R = 56;
 const DONUT_CX = 70;
@@ -267,7 +267,7 @@ export function StatusDonutChart({ statusCounts }: { statusCounts: StatusCounts 
   );
 }
 
-// ── 3. Expiry Timeline — Segmented Bar Chart ─────────────────────────────
+// ── 3. Expiry Timeline — Segmented Bar Chart ──────────────────────────────────
 
 interface ExpiryBarProps {
   expiring: ExpiringCounts;
