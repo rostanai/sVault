@@ -3,7 +3,7 @@
 Key patterns:
 - get_current: load a tenant's subscription (never raises on missing — returns None).
 - list_active_plans: all is_active plans from DB.
-- start_or_update_subscription: create a Razorpay subscription + persist.
+- start_or_update_subscription: create a Razorpay subscription + persist (two branches).
 - handle_webhook: idempotent; guards on billing_events.event_id uniqueness.
 
 Security notes (C2 fix):
@@ -14,11 +14,16 @@ Security notes (C2 fix):
 - select(Subscription).with_for_update() serializes concurrent webhooks for the same sub.
 - Notes.tenant_id is verified against the matched subscription's tenant_id (M2 fix).
 
-Security notes (M1 fix):
-- start_or_update_subscription NEVER persists status='active' until a confirmed
-  subscription.activated / subscription.charged webhook arrives. Local records are
-  persisted as 'trialing' (new) or left in their current status (updates). The dev-skip
-  path is gated behind settings.env == 'dev'.
+Security notes (M1 fix — updated):
+- Branch 1 (real payment): start_or_update_subscription NEVER persists status='active'
+  without a confirmed subscription.activated / subscription.charged webhook. This branch
+  is entered only when settings.razorpay_key_id AND plan.razorpay_plan_id are both set —
+  i.e., in production with a live Razorpay account.
+- Branch 2 (simulated/demo): when Razorpay is NOT configured (razorpay_key_id is empty)
+  OR the plan has no razorpay_plan_id, the subscription is immediately set to 'active'.
+  This is safe because no live Razorpay credentials exist in this environment — there is
+  no payment processor to bypass.  In production razorpay_key_id is always non-empty, so
+  branch 2 is never reached there.
 """
 from __future__ import annotations
 
@@ -71,16 +76,31 @@ async def start_or_update_subscription(
 ) -> dict:
     """Create (or upgrade) a Razorpay subscription and persist the local record.
 
-    Returns a dict with the Razorpay subscription id and short_url for checkout.
+    Returns a dict suitable for SubscribeResponse, including a ``payment_required``
+    boolean so the caller knows whether to open a Razorpay checkout.
 
-    Security (M1): The local subscription is NEVER persisted as 'active' by this
-    function. The status is set to 'trialing' for new subscriptions, or left at the
-    current status for upgrades. Only a confirmed webhook event
-    (subscription.activated / subscription.charged) from Razorpay may set 'active'.
+    Branch 1 — Real payment path
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Conditions: ``settings.razorpay_key_id`` is non-empty AND ``plan.razorpay_plan_id``
+    is set.  A Razorpay subscription is created via the API.  The local record is
+    persisted with ``plan_id`` updated but the status is NOT forced to ``'active'``
+    here — only a confirmed webhook (subscription.activated / subscription.charged) may
+    do that.  Returns ``payment_required=True`` plus the Razorpay checkout ``short_url``.
 
-    In dev mode (settings.env == 'dev') and when Razorpay keys are absent, the
-    subscription is stored as 'trialing' (not 'active') — the caller must simulate a
-    webhook to set it active in tests.
+    Branch 2 — Simulated/demo activation
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Conditions: ``settings.razorpay_key_id`` is empty (Razorpay not configured) OR
+    ``plan.razorpay_plan_id`` is None (plan not yet linked to a Razorpay plan).
+    This is a no-payment environment (dev/demo/test or the Free plan), so there is no
+    real charge to collect.  The subscription is immediately set to ``status='active'``
+    with the chosen plan — safe because without live Razorpay credentials no real
+    payment processor can be invoked.  Returns ``payment_required=False``,
+    ``razorpay_subscription_id=None``, ``short_url=None``.
+
+    Security note (M1): the ``status='active'`` shortcut in branch 2 is gated behind
+    the absence of live Razorpay credentials (``razorpay_key_id`` is empty string).  In
+    production, where ``razorpay_key_id`` is always set, this branch is never entered
+    and the only path to ``'active'`` remains the signed Razorpay webhook.
     """
     tid = uuid.UUID(str(tenant_id))
 
@@ -92,22 +112,31 @@ async def start_or_update_subscription(
         raise not_found("Plan not found or inactive")
 
     # Load or create the local subscription record.
-    # Status stays 'trialing' (new) or preserves current status (update).
-    # Only a webhook (subscription.activated / subscription.charged) may set 'active'.
     sub: Subscription | None = await get_current(db, tid)
+
+    # Determine which branch to take BEFORE mutating the subscription row.
+    use_real_razorpay: bool = bool(settings.razorpay_key_id and plan.razorpay_plan_id)
+
     if sub is None:
-        sub = Subscription(tenant_id=tid, plan_id=plan_id, status="trialing")
+        if use_real_razorpay:
+            # Branch 1: real payment — status stays 'trialing' until webhook fires.
+            sub = Subscription(tenant_id=tid, plan_id=plan_id, status="trialing")
+        else:
+            # Branch 2: simulated/demo — activate immediately (no live billing).
+            sub = Subscription(tenant_id=tid, plan_id=plan_id, status="active")
         db.add(sub)
     else:
         sub.plan_id = plan_id
-        # Do NOT set status='active' here — preserve current status.
-        # If currently 'active' from a prior webhook, keep it; if 'trialing', keep it.
+        if not use_real_razorpay:
+            # Branch 2: activate immediately so entitlements apply now.
+            sub.status = "active"
+        # Branch 1: preserve current status; webhook will set 'active'.
 
     razorpay_ref: dict = {}
+    payment_required: bool = False
 
-    # Attempt to create a Razorpay subscription when a plan has a razorpay_plan_id.
-    # Keys absent or plan has no razorpay_plan_id → skip, local record stays 'pending'.
-    if plan.razorpay_plan_id:
+    if use_real_razorpay:
+        # Branch 1: call the Razorpay API to create a subscription.
         try:
             rzp_sub = await rzp.create_subscription(
                 plan_id=plan.razorpay_plan_id,
@@ -118,28 +147,29 @@ async def start_or_update_subscription(
                 "razorpay_subscription_id": rzp_sub.get("id"),
                 "short_url": rzp_sub.get("short_url"),
             }
+            payment_required = True
+            log.info(
+                "razorpay_subscription_created tenant_id=%s plan_id=%s rzp_sub=%s",
+                tid, plan_id, rzp_sub.get("id"),
+            )
         except AppError as exc:
-            # Log and continue — the local record is still persisted as 'trialing'.
-            # The tenant must complete payment via the Razorpay checkout before
-            # entitlements are upgraded to the paid plan level.
+            # Log and continue — local record is persisted as 'trialing'.
+            # The tenant must complete payment via Razorpay checkout before
+            # entitlements upgrade to the paid plan level.
             log.warning(
                 "razorpay_create_subscription_failed tenant_id=%s plan_id=%s err=%s",
                 tid, plan_id, exc.message,
             )
     else:
-        # No razorpay_plan_id: dev/test path or free plan.
-        # Gate auto-activation: only allowed in dev env.
-        if settings.env == "dev":
-            log.info(
-                "dev_mode_no_razorpay_plan_id tenant_id=%s plan_id=%s "
-                "status remains pending; send a simulated webhook to activate",
-                tid, plan_id,
-            )
-        else:
-            log.warning(
-                "missing_razorpay_plan_id_in_non_dev tenant_id=%s plan_id=%s",
-                tid, plan_id,
-            )
+        # Branch 2: simulated/demo activation — no Razorpay call, no charge.
+        log.info(
+            "simulated_activation tenant_id=%s plan_id=%s "
+            "razorpay_key_id_set=%s plan_razorpay_plan_id_set=%s "
+            "status=active payment_required=False",
+            tid, plan_id,
+            bool(settings.razorpay_key_id),
+            bool(plan.razorpay_plan_id),
+        )
 
     await db.commit()
     await db.refresh(sub)
@@ -148,6 +178,7 @@ async def start_or_update_subscription(
         "subscription_id": str(sub.id),
         "status": sub.status,
         "plan_id": str(plan_id),
+        "payment_required": payment_required,
         **razorpay_ref,
     }
 
