@@ -291,14 +291,14 @@ export function ExpiryTimelineChart({ expiring }: ExpiryBarProps) {
       textClass: "text-red-600 dark:text-red-400",
     },
     {
-      label: "31–60 days",
+      label: "31—60 days",
       sublabel: "Warning",
       count: Math.max(0, expiring.next_60 - expiring.next_30),
       barClass: "bg-amber-400",
       textClass: "text-amber-600 dark:text-amber-400",
     },
     {
-      label: "61–90 days",
+      label: "61—90 days",
       sublabel: "Notice",
       count: Math.max(0, expiring.next_90 - expiring.next_60),
       barClass: "bg-yellow-300",
