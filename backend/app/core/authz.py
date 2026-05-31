@@ -30,7 +30,9 @@ _MATRIX: dict[str, set[Role]] = {
     "policy:update": {Role.admin, Role.manager, Role.owner},
     "policy:delete": {Role.admin, Role.manager},
     "document:write": {Role.admin, Role.manager, Role.owner},
-    "document:delete": {Role.admin, Role.manager},
+    # owner may delete documents on policies they own (object-level scope enforced in
+    # document_service.delete_document via policy_service.get_policy → 404 if not theirs).
+    "document:delete": {Role.admin, Role.manager, Role.owner},
     "alert:configure": {Role.admin, Role.manager, Role.owner},
     "approval:submit": {Role.admin, Role.manager, Role.owner},
     "approval:approve": {Role.admin, Role.manager},
