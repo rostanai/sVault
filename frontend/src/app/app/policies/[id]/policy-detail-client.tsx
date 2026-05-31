@@ -12,6 +12,7 @@ import {
   ingestDocument,
   getAlertRule,
   setAlertRule,
+  markPolicyRenewed,
   type PolicyRead,
   type DocumentRead,
   type AlertChannel,
@@ -37,8 +38,17 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ArrowLeft,
   AlertTriangle,
+  CheckCircle,
   Upload,
   Loader2,
   FileText,
@@ -79,6 +89,8 @@ export default function PolicyDetailClient({ id, token }: Props) {
   const [policy, setPolicy] = useState<PolicyRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [renewConfirmOpen, setRenewConfirmOpen] = useState(false);
+  const [markingRenewed, setMarkingRenewed] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -91,6 +103,20 @@ export default function PolicyDetailClient({ id, token }: Props) {
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id, token]);
+
+  async function handleMarkRenewed() {
+    setMarkingRenewed(true);
+    try {
+      const updated = await markPolicyRenewed(token, id);
+      setPolicy(updated);
+      setRenewConfirmOpen(false);
+      toast.success("Policy marked as renewed.");
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setMarkingRenewed(false);
+    }
+  }
 
   if (loading) return <DetailSkeleton />;
   if (error) return <ErrorState message={error} />;
@@ -135,20 +161,41 @@ export default function PolicyDetailClient({ id, token }: Props) {
             {categorylabel(policy.category)}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <Badge
-            variant={
-              policy.status === "active"
-                ? "success"
-                : policy.status === "expiring"
-                ? "warning"
-                : policy.status === "lapsed" || policy.status === "cancelled"
-                ? "destructive"
-                : "secondary"
-            }
-          >
-            {statusLabel(policy.status)}
-          </Badge>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <Badge
+              variant={
+                policy.status === "active"
+                  ? "success"
+                  : policy.status === "expiring"
+                  ? "warning"
+                  : policy.status === "lapsed" || policy.status === "cancelled"
+                  ? "destructive"
+                  : "secondary"
+              }
+            >
+              {statusLabel(policy.status)}
+            </Badge>
+            {policy.status !== "renewed" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRenewConfirmOpen(true)}
+                disabled={markingRenewed}
+                aria-label="Mark this policy as renewed"
+                className="h-7 px-2.5 text-xs text-brand-600 border-brand-600/40 hover:bg-brand-600/10 dark:text-brand-400 dark:border-brand-600/40 dark:hover:bg-brand-600/10"
+              >
+                {markingRenewed ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                    Mark renewed
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
           {daysLeft != null && (
             <Badge variant={daysLeftVariant(daysLeft)} className="text-xs">
               {daysLeft < 0
@@ -158,6 +205,47 @@ export default function PolicyDetailClient({ id, token }: Props) {
           )}
         </div>
       </div>
+
+      {/* Mark renewed confirm dialog */}
+      <Dialog open={renewConfirmOpen} onOpenChange={setRenewConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Mark policy as renewed?</DialogTitle>
+            <DialogDescription>
+              This sets the status to &ldquo;Renewed&rdquo; and cancels all pending
+              alerts for this policy. You can re-activate alerts at any time.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRenewConfirmOpen(false)}
+              disabled={markingRenewed}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleMarkRenewed}
+              disabled={markingRenewed}
+              className="bg-brand-600 hover:bg-brand-600/90 text-white"
+            >
+              {markingRenewed ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="mr-1.5 h-4 w-4" />
+                  Confirm
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Details card */}
       <Card>
