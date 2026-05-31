@@ -25,6 +25,21 @@ def _accessible_org_filter(user: CurrentUser):
     return uuid.UUID(user.org_id) if user.org_id else None
 
 
+def _owner_filter(user: CurrentUser) -> uuid.UUID | None:
+    """Object-level scope: the **owner** role may only see/act on the policies they own.
+
+    Returns the user's id (to filter ``Policy.owner_id == id``) for the owner role,
+    or ``None`` (no object restriction) for every other role. Super Admin is never
+    object-scoped. Admin / Manager / Viewer keep full org/group scope (org filter only).
+
+    Mirror in the DB via RLS (see docs/SCHEMA.md). Apply this ALONGSIDE
+    ``_accessible_org_filter`` at every read/aggregation that touches ``policies``.
+    """
+    if user.is_super_admin:
+        return None
+    return uuid.UUID(user.user_id) if user.role == "owner" else None
+
+
 async def list_policies(
     db: AsyncSession,
     user: CurrentUser,
@@ -38,6 +53,8 @@ async def list_policies(
     org = _accessible_org_filter(user)
     if org is not None:
         stmt = stmt.where(Policy.org_id == org)
+    if (oid := _owner_filter(user)) is not None:
+        stmt = stmt.where(Policy.owner_id == oid)
     if category:
         stmt = stmt.where(Policy.category == category)
     if status:
@@ -54,6 +71,11 @@ async def get_policy(db: AsyncSession, user: CurrentUser, policy_id: uuid.UUID) 
     org = _accessible_org_filter(user)
     if org is not None:
         stmt = stmt.where(Policy.org_id == org)
+    # Object-level: an owner may only load policies they own. Adding the WHERE (rather
+    # than loading then comparing) means a non-owned/other id yields None -> 404, so we
+    # never reveal the existence of a policy the owner can't access.
+    if (oid := _owner_filter(user)) is not None:
+        stmt = stmt.where(Policy.owner_id == oid)
     policy = (await db.execute(stmt)).scalar_one_or_none()
     if policy is None:
         raise not_found("Policy not found")
