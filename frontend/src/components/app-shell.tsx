@@ -26,6 +26,7 @@ import {
   CheckSquare,
   FileBarChart,
   Code2,
+  BellRing,
   Menu,
   X,
   LogOut,
@@ -56,6 +57,7 @@ const navItems: NavItem[] = [
   { label: "Ask sVault", href: "/app/ask", icon: Sparkles },
   { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
   { label: "Alerts", href: "/app/alerts", icon: Bell },
+  { label: "Notifications", href: "/app/notifications", icon: BellRing },
   { label: "Reports", href: "/app/reports", icon: FileBarChart },
   { label: "Developer", href: "/app/developer", icon: Code2 },
   { label: "Billing", href: "/app/billing", icon: CreditCard },
@@ -363,10 +365,10 @@ export default function AppShell({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link
-                    href="/app/alerts"
+                    href="/app/notifications"
                     className="justify-center text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
                   >
-                    View all alerts
+                    View all notifications
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
