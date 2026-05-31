@@ -16,6 +16,7 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.0",
     "openai>=1.30",
     "pypdf>=4.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

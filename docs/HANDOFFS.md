@@ -374,3 +374,83 @@
   - Document upload raw PUT goes directly to Supabase Storage (signed URL) — bypasses apiFetch so no auth header is sent (correct per Supabase Storage spec).
   - `getMe` is called server-side in settings/page.tsx with `silent: true` already set on that function — non-fatal if it fails (falls back to "viewer").
   - Tech-lead to run `npm run typecheck && npm run build` before merge.
+
+### 2026-05-31 — ui-ux-designer — AI Policy Intake flow (branch integrate-ai-approvals)
+
+- Did: Added the AI Policy Intake flow to the Policies page. Zero changes to `api.ts` or `app-shell.tsx`.
+
+  **New file — `frontend/src/app/app/policies/ai-intake-dialog.tsx`:**
+  - Standalone `"use client"` component. Props: `open`, `onOpenChange`, `token`, `onExtracted(PolicyExtraction)`, `onEnterManually()`.
+  - PDF-only drag-and-drop zone (also click-to-browse): hidden `<input type="file" accept=".pdf">` with `fileRef.current?.click()`, drag events (`onDragOver` / `onDragLeave` / `onDrop`). Visual feedback for drag-over state and selected-file state. Remove button (×) to deselect. Max 20 MB enforced client-side.
+  - "Extract with AI" button: disabled until a file is chosen; `<Loader2 animate-spin>` while extracting; calls `extractPolicyFromDocument(token, file)` from `@/lib/api`.
+  - Scanned-document path (`extracted_text_chars === 0`): renders a blue info alert with the `notes` from the API; footer switches to "Cancel" + "Enter manually" (calls `onEnterManually` and closes). No model name exposed in copy.
+  - Error recovery: `extractPolicyFromDocument` already toasts on failure; `finally` block resets `extracting` so the user can retry. Dialog can be freely closed (state reset on close via `resetState()`).
+  - Accessible: `role="button"`, `tabIndex={0}`, `onKeyDown` (Enter/Space triggers file pick), `aria-label` on all interactive elements, `aria-hidden` on decorative icons.
+
+  **Edited file — `frontend/src/app/app/policies/policies-client.tsx`:**
+  - **Imports added**: `Sparkles` (lucide-react), `Checkbox` (`@/components/ui/checkbox`), `setAlertRule` + `type PolicyExtraction` from `@/lib/api`, `AiIntakeDialog` (local).
+  - **State added**: `newGst`, `newInceptionDate` (new form fields to match `PolicyCreate` schema), `aiPrefilled` (boolean), `enableAlerts` (boolean, default `true`), `intakeOpen` (boolean for intake dialog visibility).
+  - **`handleExtracted(extraction: PolicyExtraction)`**: maps all extraction fields into the existing form state (`newCategory`, `newTitle`, `newPolicyNumber`, `newSumInsured`, `newPremium`, `newGst`, `newInceptionDate`, `newExpiryDate`); sets `aiPrefilled = true`; opens `dialogOpen`; shows a sonner `toast.info` with the insurer name if present (since there is no `provider_id` field on the form).
+  - **`handleAddPolicy`**: extended to also pass `gst_inr` and `inception_date` to `createPolicy`. After success, if `enableAlerts` is checked, calls `setAlertRule(token, created.id, { lead_days:[60,30,15,7,1], channels:["email"], escalate:false, is_active:true })` as a best-effort fire-and-forget (`.catch(...)` shows a warning toast but never blocks the success flow).
+  - **`resetForm`**: clears `newGst`, `newInceptionDate`, resets `aiPrefilled` to `false` and `enableAlerts` to `true`.
+  - **Header JSX**: "Add Policy" `<DialogTrigger>` is now inside a `<div className="flex items-center gap-2 shrink-0">` wrapper. Before it: an outline `<Button>` ("AI Intake", Sparkles icon) that sets `intakeOpen = true`, and the `<AiIntakeDialog>` rendered adjacent (no `DialogTrigger` needed — controlled via `open` prop). The create `<Dialog>` `onOpenChange` now also calls `resetForm()` on close.
+  - **Create dialog**: `max-h-[90vh] overflow-y-auto` added. Title dynamically shows "Review Policy" + the "✨ AI-filled — please review" badge (brand-600 pill) when `aiPrefilled` is true. Form gains two new fields: GST (₹) and an Inception Date / Expiry Date grid (expiry was already present, now side-by-side with inception). Renewal alerts opt-in block (bordered card with `<Checkbox>` + label + description copy) appended before `<DialogFooter>`. Submit button label is "Create Policy" when `aiPrefilled`, otherwise "Add Policy".
+  - All existing list, filter, sort, row-click, empty/error/loading states fully preserved.
+
+- Files changed:
+  - `frontend/src/app/app/policies/ai-intake-dialog.tsx` — NEW
+  - `frontend/src/app/app/policies/policies-client.tsx` — EDITED
+  - `frontend/src/lib/api.ts` — NOT touched
+  - `frontend/src/components/app-shell.tsx` — NOT touched
+
+- Notes / compile confidence:
+  - `Checkbox` from shadcn/ui (`@/components/ui/checkbox`) — assumed pre-installed (it ships with new-york style set); tech-lead to verify `frontend/src/components/ui/checkbox.tsx` exists and add if not (`npx shadcn@latest add checkbox`).
+  - `setAlertRule` is already exported from `api.ts` — no redefinition.
+  - `PolicyExtraction` is already exported from `api.ts` — used only as a type parameter; no runtime import.
+  - No `any` used anywhere in either file.
+  - Tech-lead to run `npm run typecheck && npm run build` before merge.
+
+### 2026-05-31 — notifications-engineer — multi-channel delivery layer (branch integrate-ai-approvals)
+
+- Did: Built the full channel-adapter package and wired it into the alert engine.
+
+  **New package `backend/app/services/notifications/`** (5 files):
+  - `base.py` — `SendResult` dataclass (`status`, `provider_msg_id`, `error`); shared by all adapters.
+  - `whatsapp.py` — WhatsApp Business Cloud API adapter. Simulated when `WHATSAPP_TOKEN` is absent; real path uses Meta Graph API v19.0 with utility template `svault_renewal_reminder`. Module comment documents opt-in and utility-vs-marketing classification requirement.
+  - `sms.py` — India TRAI DLT transactional SMS via MSG91 Flow API. Simulated when `SMS_API_KEY` absent; real path requires `SMS_DLT_TEMPLATE_ID` (TRAI-registered) + `SMS_SENDER_ID`. Module comment documents entity registration, template registration, 24/7 transactional vs promotional 10–21 IST restriction, and CTA URL whitelisting (Aug/Oct 2024 rules).
+  - `telegram.py` — Telegram Bot `sendMessage`. Simulated when `TELEGRAM_BOT_TOKEN` absent; real path POSTs to `api.telegram.org/bot{token}/sendMessage`. Note: `recipient` must be a `chat_id` string (not a phone); requires opt-in bot `/start` flow to populate.
+  - `email.py` — Transactional email via Resend HTTP API. Simulated when `EMAIL_API_KEY` absent; real path POSTs HTML email with policy renewal body. Requires `EMAIL_FROM_ADDRESS` env var for live mode.
+  - `__init__.py` — re-exports `dispatch_alert`, `SendResult`.
+  - `dispatcher.py` — `dispatch_alert(db, alert)` coordinator: resolves recipient (email for email channel, phone for all others) from policy owner's Profile, builds message text, calls the correct adapter via module-level lookup (patch-safe), writes `NotificationLog` row (always, even on failure), updates `alert.status` to `"sent"` or `"failed"`. Never raises — all errors are captured so the scan loop continues.
+
+  **Edited `backend/app/services/notifier.py`**: replaced the TODO stub with a thin facade that delegates to the adapter modules via module-level dict lookup (not import-time function references, so test patches work). Preserves `channel_configured()` and `async send()` interface exactly — existing callers and tests unchanged.
+
+  **Edited `backend/app/services/alert_engine.py`**: replaced the inline `notifier.send` + `db.add(NotificationLog(...))` block with a single `await dispatch_alert(db, alert)` call. Return shape `{date, alerts_created, dispatched}` preserved exactly. Removed now-unused `NotificationLog`, `Profile` imports from alert_engine; removed `notifier` import.
+
+  **New `backend/tests/test_notifications.py`** (35 tests):
+  - Each adapter returns `status="simulated"` with no `httpx.AsyncClient` instantiation when credentials are absent.
+  - `notifier.send("channel", ...)` routes to the correct adapter module's `send` function.
+  - `dispatch_alert` writes a `NotificationLog` row and flips `alert.status` (simulated → sent; failed → failed).
+  - Missing policy, missing recipient, and no-contact-for-channel paths all set `status="failed"` and write a log row.
+  - Recipient resolution: email channel uses `profile.email`; all other channels use `profile.phone`.
+  - `SendResult` dataclass defaults and full-field construction.
+  - Backward-compat: `notifier.send` simulated + failed-on-no-recipient still work.
+
+- Results: `ruff check .` — all checks passed (0 errors). `pytest -q` — **163 passed, 0 failed**, 1 deprecation warning (pre-existing, unrelated to this work).
+
+- Cadence config: default `[60, 30, 15, 7, 1]` days (inherited from `DEFAULT_LEAD_DAYS`); per-policy and tenant-default overrides via `AlertRule`. Configurable via `PUT /api/v1/policies/{id}/alert-rule`.
+
+- Channels wired: `whatsapp`, `sms`, `telegram`, `email`. All run in simulated mode until credentials are set in env.
+
+- Template requirements for going live:
+  - WhatsApp: register `svault_renewal_reminder` as a **utility** template in Meta Business Manager (`WHATSAPP_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID`).
+  - SMS: register entity + template on TRAI DLT portal (free); set `SMS_API_KEY` (MSG91 authkey), `SMS_DLT_TEMPLATE_ID`, `SMS_SENDER_ID` (6-char, e.g. `SVAULT`); classify as transactional/service.
+  - Telegram: users must `/start` the bot to capture `chat_id`; store in `profiles.phone` or a future `profiles.telegram_id` column.
+  - Email: set `EMAIL_API_KEY` (Resend bearer token) + `EMAIL_FROM_ADDRESS` (verified sender domain).
+
+- Secrets: all credentials read from `app.core.config.settings` (env vars); none hardcoded.
+
+- Pending / next:
+  - devops-engineer: set `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `SMS_API_KEY`, `SMS_DLT_TEMPLATE_ID`, `SMS_SENDER_ID`, `TELEGRAM_BOT_TOKEN`, `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS` in Vercel env for live mode.
+  - Telegram opt-in flow (bot `/start` → store `chat_id`) needs a UI and a Profile field update.
+  - Escalation (owner → manager → admin if unacknowledged) is tracked in `AlertRule.escalate` but the escalation scan is not yet implemented; planned for next iteration.
