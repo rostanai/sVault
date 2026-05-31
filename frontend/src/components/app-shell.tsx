@@ -28,7 +28,9 @@ import {
   X,
   LogOut,
   User,
+  Zap,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 interface NavItem {
@@ -53,6 +55,9 @@ interface AppShellProps {
   email: string;
   name: string;
   avatarUrl?: string;
+  planName?: string;
+  subscriptionStatus?: string;
+  trialDaysLeft?: number | null;
 }
 
 export default function AppShell({
@@ -60,6 +65,9 @@ export default function AppShell({
   email,
   name,
   avatarUrl,
+  planName = "Free",
+  subscriptionStatus = "free",
+  trialDaysLeft = null,
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -80,10 +88,52 @@ export default function AppShell({
     router.push("/login");
   }
 
-  function isActive(href: string) {
+  // Determine plan badge variant and CTA label.
+  const isTrialing = subscriptionStatus === "trialing";
+  const isActive = (href: string) => {
     if (href === "/app") return pathname === "/app";
     return pathname.startsWith(href);
-  }
+  };
+
+  const planBadgeVariant: "success" | "warning" | "secondary" =
+    subscriptionStatus === "active"
+      ? "success"
+      : subscriptionStatus === "trialing"
+        ? "warning"
+        : "secondary";
+
+  const planCtaLabel =
+    subscriptionStatus === "active" ? "Manage plan" : "Upgrade";
+
+  const PlanStatusBlock = () => (
+    <div className="mx-3 mb-3 mt-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
+      <div className="flex items-center gap-2">
+        <Zap
+          className="h-3.5 w-3.5 shrink-0 text-brand-600 dark:text-brand-400"
+          aria-hidden="true"
+        />
+        <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100 truncate">
+          {planName}
+        </span>
+        <Badge
+          variant={planBadgeVariant}
+          className="ml-auto shrink-0 text-[10px] leading-none px-1.5 py-0.5 capitalize"
+        >
+          {isTrialing && trialDaysLeft != null
+            ? `${trialDaysLeft}d left`
+            : subscriptionStatus.replace(/_/g, " ")}
+        </Badge>
+      </div>
+      <Link
+        href="/app/billing"
+        onClick={() => setSidebarOpen(false)}
+        className="mt-2 block text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 rounded"
+        aria-label={`${planCtaLabel} — go to billing`}
+      >
+        {planCtaLabel} &rarr;
+      </Link>
+    </div>
+  );
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <nav
@@ -91,24 +141,28 @@ export default function AppShell({
         "flex flex-col gap-1 px-3 py-4",
         mobile ? "pt-2" : "h-full"
       )}
+      aria-label="Main navigation"
     >
-      {navItems.map(({ label, href, icon: Icon }) => (
-        <Link
-          key={href}
-          href={href}
-          onClick={() => setSidebarOpen(false)}
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-            isActive(href)
-              ? "bg-brand-600 text-white"
-              : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-          )}
-          aria-current={isActive(href) ? "page" : undefined}
-        >
-          <Icon className="h-4 w-4 shrink-0" />
-          {label}
-        </Link>
-      ))}
+      <div className="flex-1">
+        {navItems.map(({ label, href, icon: Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            onClick={() => setSidebarOpen(false)}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              isActive(href)
+                ? "bg-brand-600 text-white"
+                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            )}
+            aria-current={isActive(href) ? "page" : undefined}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {label}
+          </Link>
+        ))}
+      </div>
+      <PlanStatusBlock />
     </nav>
   );
 

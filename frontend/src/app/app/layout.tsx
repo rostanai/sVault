@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AppShell from "@/components/app-shell";
+import { getSubscription, getPlans } from "@/lib/api";
 
 export default async function AppLayout({
   children,
@@ -23,8 +24,57 @@ export default async function AppLayout({
     "User";
   const avatarUrl = user.user_metadata?.avatar_url as string | undefined;
 
+  // Best-effort: fetch subscription + plans server-side.
+  // A billing error must never block the app shell from rendering.
+  let planName: string = "Free";
+  let subscriptionStatus: string = "free";
+  let trialDaysLeft: number | null = null;
+
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session?.access_token) {
+      const token = session.access_token;
+      const [subData, plans] = await Promise.all([
+        getSubscription(token),
+        getPlans(token),
+      ]);
+
+      const sub = subData?.subscription;
+      if (sub) {
+        subscriptionStatus = sub.status;
+
+        // Resolve plan name from the plans list.
+        const matchedPlan = plans.find((p) => p.id === sub.plan_id);
+        if (matchedPlan) {
+          planName = matchedPlan.name;
+        } else if (sub.status === "trialing") {
+          planName = "Trial";
+        }
+
+        // Compute trial days left.
+        if (sub.status === "trialing" && sub.trial_ends_at) {
+          const msLeft =
+            new Date(sub.trial_ends_at).getTime() - Date.now();
+          trialDaysLeft = Math.max(0, Math.ceil(msLeft / 86400000));
+        }
+      }
+    }
+  } catch {
+    // Billing fetch failed — fall back to "Free" defaults.
+  }
+
   return (
-    <AppShell email={email} name={name} avatarUrl={avatarUrl}>
+    <AppShell
+      email={email}
+      name={name}
+      avatarUrl={avatarUrl}
+      planName={planName}
+      subscriptionStatus={subscriptionStatus}
+      trialDaysLeft={trialDaysLeft}
+    >
       {children}
     </AppShell>
   );
