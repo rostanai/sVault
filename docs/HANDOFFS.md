@@ -455,6 +455,38 @@
   - Telegram opt-in flow (bot `/start` → store `chat_id`) needs a UI and a Profile field update.
   - Escalation (owner → manager → admin if unacknowledged) is tracked in `AlertRule.escalate` but the escalation scan is not yet implemented; planned for next iteration.
 
+### 2026-05-31 — ui-ux-designer — Super-Admin console at /app/admin (branch integrate-ai-approvals)
+
+- Did: Built the full platform Super-Admin console. No changes to `src/lib/api.ts` or any backend file.
+
+  **Files created:**
+  - `frontend/src/app/app/admin/page.tsx` — Server Component gate: calls `getMe(token)`, redirects non-super-admins to `/app`, renders `<AdminClient token={token} />`.
+  - `frontend/src/app/app/admin/admin-client.tsx` — Full console UI with four tabs.
+
+  **Files edited:**
+  - `frontend/src/app/app/layout.tsx` — added `getMe` import; calls it concurrently with `getSubscription`/`getPlans` in the existing `Promise.all` (best-effort `.catch(() => null)`); resolves `isSuperAdmin: boolean` and passes to `<AppShell>`.
+  - `frontend/src/components/app-shell.tsx` — added `ShieldCheck` to lucide imports; added `isSuperAdmin?: boolean` prop (default `false`); builds `allNavItems` by spreading `navItems` + conditionally appending `{label:"Admin", href:"/app/admin", icon:ShieldCheck}`. Admin link styled with a dashed brand border when not active to visually distinguish it from tenant nav.
+
+  **Tab details:**
+  - **Overview**: calls `adminGetAnalytics` → 4 metric cards (Total/Active/Suspended tenants, MRR in INR via `formatINR`), "Subscriptions by status" list with `subStatusVariant` badge colouring, "Active by tier" list. Full skeleton while loading.
+  - **Plans**: calls `adminListPlans` (includes inactive). Table: tier Badge, name, price (`formatINR`), billing period, active/inactive Badge, Razorpay Plan ID (monospace if set, "—" if null). Per-row "Edit" button opens `EditPlanDialog` (PATCH via `adminUpdatePlan`). "New plan" button opens `NewPlanDialog` (POST via `adminCreatePlan`). Both dialogs share `PlanFormFields`: name, description, price_inr (number input), billing period (Select: monthly/quarterly/annual/one_time), Razorpay Plan ID (monospace input with helper note), active Switch, Entitlements JSON textarea (pre-filled with `JSON.stringify(..., null, 2)`; JSON.parse validated on submit; invalid JSON shows error toast and blocks submit). NewPlan adds tier select (free/starter/professional/enterprise). Refetches after save.
+  - **Tenants**: calls `adminListTenants({ limit:100 })`. Table: name + truncated ID (monospace), status Badge (active→success / else→destructive), created date (`formatDate`), per-row Suspend/Activate button with per-row loading spinner. Calls `adminSuspendTenant`/`adminActivateTenant` and refetches.
+  - **Settings**: renders all 8 known secret keys (`svault_ai_api_key`, `razorpay_key_id`, `razorpay_key_secret`, `razorpay_webhook_secret`, `whatsapp_token`, `sms_api_key`, `telegram_bot_token`, `email_api_key`). On mount, calls `adminGetSetting` for each concurrently (best-effort; 404 treated as "Not set"). Each row: label + "Set ✓" (CheckCircle2, emerald) or "Not set" (CircleDashed, zinc) indicator + description + key name (monospace, selectable). Password-style input (reveal/hide toggle with Eye/EyeOff), Save button calls `adminSetSetting(token, key, {value, is_secret:true})`; on success, marks as "Set" and clears input (secret values never echoed back). Note about encryption at rest at the top of the tab. Per-row loading skeletons while settings load.
+
+  **Quality:**
+  - Zero `any` — all types from `@/lib/api` (`PlatformAnalytics`, `PlanRead`, `PlanWrite`, `PlatformTenant`, `PlatformSetting`) or `Record<string, unknown>`.
+  - Loading/empty/error states: `OverviewSkeleton`, `TableSkeleton`, `EmptyState`, `TabError` components.
+  - Accessible: `aria-label` on all action buttons, `htmlFor`/`id` pairs on all inputs, keyboard-accessible show/hide toggle.
+  - Dark-mode aware throughout: `dark:border-zinc-800`, `dark:bg-zinc-900`, `dark:text-zinc-*`, matching existing app visual language.
+  - Admin nav link visible ONLY when `isSuperAdmin=true` — normal tenants never see it.
+
+- Stitch designs: deferred (console complexity justified by direct build; no net-new user-facing screens requiring Stitch review — it is a platform-internal admin tool).
+- Component paths:
+  - `frontend/src/app/app/admin/page.tsx`
+  - `frontend/src/app/app/admin/admin-client.tsx`
+  - `frontend/src/app/app/layout.tsx` (edited)
+  - `frontend/src/components/app-shell.tsx` (edited)
+
 ### 2026-05-31 — billing-engineer — fix subscription upgrade flow (simulated-activation branch)
 
 - Did: Fixed the upgrade flow so it actually takes effect when Razorpay is not fully configured (seeded plans, no razorpay_plan_id, or no razorpay_key_id).
