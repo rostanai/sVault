@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   FileText,
+  Building2,
   Bell,
   CreditCard,
   Settings,
@@ -39,6 +40,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard },
   { label: "Policies", href: "/app/policies", icon: FileText },
+  { label: "Providers", href: "/app/providers", icon: Building2 },
   { label: "Ask sVault", href: "/app/ask", icon: Sparkles },
   { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
   { label: "Alerts", href: "/app/alerts", icon: Bell },

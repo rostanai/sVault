@@ -8,7 +8,7 @@ import { toast } from "sonner";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "https://svault.rstglobal.in/api/v1";
 
-// ── Error type ──────────────────────────────────────────────────────────
+// Error type
 
 export class AppError extends Error {
   code: string;
@@ -28,7 +28,7 @@ export class AppError extends Error {
   }
 }
 
-// ── Fetch core ──────────────────────────────────────────────────────────
+// Fetch core
 
 async function apiFetch<T>(
   path: string,
@@ -84,7 +84,7 @@ export function withToken(token: string) {
   };
 }
 
-// ── Types (derived from backend Pydantic schemas) ────────────────────────────
+// Types (derived from backend Pydantic schemas)
 
 export interface Health {
   status: string;
@@ -265,7 +265,7 @@ export interface InvoiceRead {
   razorpay_invoice_id: string | null;
 }
 
-// ── Endpoint functions (token-aware, used from Client Components) ─────────────
+// Endpoint functions (token-aware, used from Client Components)
 
 export const getHealth = () => apiFetch<Health>("/health");
 
@@ -322,7 +322,7 @@ export const getSubscription = (token: string) =>
 export const getInvoices = (token: string) =>
   apiFetch<InvoiceRead[]>("/billing/invoices", { token, silent: true });
 
-// ── Billing: subscribe ─────────────────────────────────────────────────
+// Billing: subscribe
 
 export interface SubscribeResponse {
   subscription_id: string;
@@ -339,7 +339,7 @@ export const subscribe = (token: string, planId: string) =>
     token,
   });
 
-// ── Documents ─────────────────────────────────────────────────────────
+// Documents
 
 export type DocType =
   | "policy"
@@ -422,7 +422,7 @@ export const deleteDocument = (token: string, documentId: string) =>
     silent: true,
   });
 
-// ── Users / Invitations ──────────────────────────────────────────────
+// Users / Invitations
 
 export interface ProfileRead {
   id: string;
@@ -470,7 +470,7 @@ export const createInvitation = (
     token,
   });
 
-// ── Ask sVault (AI / RAG) ─────────────────────────────────────────────
+// Ask sVault (AI / RAG)
 
 export interface AskSource {
   policy_id: string;
@@ -505,7 +505,7 @@ export const ingestDocument = (
     { method: "POST", token }
   );
 
-// ── Approvals ─────────────────────────────────────────────────────────
+// Approvals
 
 export type ApprovalActionType =
   | "renewal"
@@ -578,5 +578,95 @@ export const rejectApproval = (
   apiFetch<ApprovalRead>(`/approvals/${approvalId}/reject`, {
     method: "POST",
     body: JSON.stringify({ reason: reason ?? null }),
+    token,
+  });
+
+// Providers (insurers / vendors)
+
+export interface ProviderRead {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+}
+
+export interface ProviderCreate {
+  name: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  notes?: string;
+}
+
+export const getProviders = (token: string) =>
+  apiFetch<ProviderRead[]>("/providers", { token });
+
+export const createProvider = (token: string, body: ProviderCreate) =>
+  apiFetch<ProviderRead>("/providers", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+// Alerts (renewal notifications)
+
+export type AlertChannel = "whatsapp" | "email" | "sms" | "telegram";
+
+export interface AlertRead {
+  id: string;
+  policy_id: string;
+  channel: string;
+  lead_day: number;
+  scheduled_for: string;
+  status: string;
+  acknowledged_at: string | null;
+}
+
+export interface AlertRuleRead {
+  id: string | null;
+  policy_id: string | null;
+  lead_days: number[];
+  channels: string[];
+  escalate: boolean;
+  is_active: boolean;
+}
+
+export interface AlertRuleUpdate {
+  lead_days?: number[];
+  channels?: AlertChannel[];
+  escalate?: boolean;
+  is_active?: boolean;
+}
+
+export const getAlerts = (
+  token: string,
+  params?: { status?: string; limit?: number; offset?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<AlertRead[]>(`/alerts${query}`, { token });
+};
+
+export const acknowledgeAlert = (token: string, alertId: string) =>
+  apiFetch<{ id: string; status: string }>(`/alerts/${alertId}/ack`, {
+    method: "POST",
+    token,
+  });
+
+export const getAlertRule = (token: string, policyId: string) =>
+  apiFetch<AlertRuleRead>(`/policies/${policyId}/alert-rule`, { token });
+
+export const setAlertRule = (
+  token: string,
+  policyId: string,
+  body: AlertRuleUpdate
+) =>
+  apiFetch<AlertRuleRead>(`/policies/${policyId}/alert-rule`, {
+    method: "PUT",
+    body: JSON.stringify(body),
     token,
   });
