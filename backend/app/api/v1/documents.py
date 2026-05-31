@@ -43,6 +43,19 @@ async def record_document(
     db: AsyncSession = Depends(get_db),
 ) -> DocumentWithUrl:
     doc = await document_service.record_document(db, user, policy_id, payload)
+    # Auto-process on upload (best-effort): index for Ask sVault + AI-extract dates,
+    # so search works without a manual Index click and renewal alerts schedule
+    # themselves. auto_process_document is internally guarded; the extra try/except
+    # is belt-and-suspenders so a failure here can never break the upload.
+    try:
+        ai_key = await secrets_service.get_secret(
+            db, "svault_ai_api_key", settings.svault_ai_api_key
+        )
+        await document_service.auto_process_document(
+            db, user, policy_id, doc.id, ai_key=ai_key
+        )
+    except Exception:  # noqa: BLE001 — upload must succeed regardless of auto-process
+        pass
     from app.core import storage
     url = await storage.create_signed_download_url(doc.storage_path)
     return DocumentWithUrl(
