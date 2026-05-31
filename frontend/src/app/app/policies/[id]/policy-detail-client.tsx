@@ -10,8 +10,12 @@ import {
   recordDocument,
   deleteDocument,
   ingestDocument,
+  getAlertRule,
+  setAlertRule,
   type PolicyRead,
   type DocumentRead,
+  type AlertChannel,
+  type AlertRuleRead,
 } from "@/lib/api";
 import {
   formatDate,
@@ -19,6 +23,7 @@ import {
   daysLeftVariant,
   categorylabel,
   statusLabel,
+  cn,
 } from "@/lib/utils";
 import {
   Card,
@@ -29,6 +34,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -39,6 +46,11 @@ import {
   Trash2,
   Paperclip,
   Sparkles,
+  Bell,
+  MessageSquare,
+  Mail,
+  Phone,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -169,22 +181,223 @@ export default function PolicyDetailClient({ id, token }: Props) {
       {/* Documents */}
       <DocumentsCard policyId={id} token={token} />
 
-      {/* Alert Schedule stub */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold">Alert Schedule</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-zinc-400">
-            Alert configuration coming soon.
-          </p>
-        </CardContent>
-      </Card>
+      {/* Alert Schedule */}
+      <AlertRuleCard policyId={id} token={token} />
     </div>
   );
 }
 
-// ── Documents card ────────────────────────────────────────────────────────
+// Alert Rule card
+
+const STANDARD_LEAD_DAYS = [60, 30, 15, 7, 1];
+
+type IconComponent = React.ComponentType<{ className?: string }>;
+
+const CHANNEL_OPTIONS: { value: AlertChannel; label: string; Icon: IconComponent }[] = [
+  { value: "whatsapp", label: "WhatsApp", Icon: MessageSquare },
+  { value: "email", label: "Email", Icon: Mail },
+  { value: "sms", label: "SMS", Icon: Phone },
+  { value: "telegram", label: "Telegram", Icon: Send },
+];
+
+function AlertRuleCard({
+  policyId,
+  token,
+}: {
+  policyId: string;
+  token: string;
+}) {
+  const [ruleLoading, setRuleLoading] = useState(true);
+  const [isActive, setIsActive] = useState(true);
+  const [leadDays, setLeadDays] = useState<number[]>([60, 30, 15, 7, 1]);
+  const [channels, setChannels] = useState<AlertChannel[]>(["email"]);
+  const [escalate, setEscalate] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    setRuleLoading(true);
+    getAlertRule(token, policyId)
+      .then((rule: AlertRuleRead) => {
+        setIsActive(rule.is_active);
+        setLeadDays(rule.lead_days.length > 0 ? rule.lead_days : [60, 30, 15, 7, 1]);
+        setChannels(
+          rule.channels.length > 0
+            ? (rule.channels as AlertChannel[])
+            : ["email"]
+        );
+        setEscalate(rule.escalate);
+      })
+      .catch((err: Error) => {
+        toast.error("Failed to load alert schedule.", {
+          description: err.message,
+        });
+      })
+      .finally(() => setRuleLoading(false));
+  }, [policyId, token]);
+
+  function toggleLeadDay(day: number) {
+    setLeadDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  }
+
+  function toggleChannel(ch: AlertChannel) {
+    setChannels((prev) =>
+      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+    );
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await setAlertRule(token, policyId, {
+        is_active: isActive,
+        lead_days: leadDays,
+        channels,
+        escalate,
+      });
+      toast.success("Alert schedule saved.");
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+          <Bell className="h-4 w-4 text-brand-600" />
+          Alert Schedule
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {ruleLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-5 w-48" />
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {/* is_active toggle */}
+            <div className="flex items-center justify-between gap-4">
+              <Label
+                htmlFor="alertRuleActive"
+                className="text-sm font-medium cursor-pointer"
+              >
+                Alerts enabled
+              </Label>
+              <Switch
+                id="alertRuleActive"
+                checked={isActive}
+                onCheckedChange={setIsActive}
+              />
+            </div>
+
+            {/* Lead days */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Remind me before expiry
+              </p>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Lead days selection">
+                {STANDARD_LEAD_DAYS.map((day) => {
+                  const selected = leadDays.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleLeadDay(day)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs font-semibold border transition-colors",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600",
+                        selected
+                          ? "bg-brand-600 text-white border-brand-600"
+                          : "bg-transparent text-zinc-600 border-zinc-300 hover:border-brand-600 hover:text-brand-600 dark:text-zinc-400 dark:border-zinc-700 dark:hover:border-brand-600 dark:hover:text-brand-600"
+                      )}
+                    >
+                      {day}d
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Channels */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Channels
+              </p>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Channel selection">
+                {CHANNEL_OPTIONS.map(({ value, label, Icon }) => {
+                  const selected = channels.includes(value);
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => toggleChannel(value)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold border transition-colors",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600",
+                        selected
+                          ? "bg-brand-600 text-white border-brand-600"
+                          : "bg-transparent text-zinc-600 border-zinc-300 hover:border-brand-600 hover:text-brand-600 dark:text-zinc-400 dark:border-zinc-700 dark:hover:border-brand-600 dark:hover:text-brand-600"
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Escalate toggle */}
+            <div className="flex items-center justify-between gap-4">
+              <Label
+                htmlFor="alertRuleEscalate"
+                className="text-sm font-medium cursor-pointer"
+              >
+                Escalate if unacknowledged
+              </Label>
+              <Switch
+                id="alertRuleEscalate"
+                checked={escalate}
+                onCheckedChange={setEscalate}
+              />
+            </div>
+
+            {/* Save */}
+            <div className="pt-1">
+              <Button
+                size="sm"
+                disabled={saving}
+                onClick={handleSave}
+                className="bg-brand-600 hover:bg-brand-600/90 text-white"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Documents card
 
 function DocumentsCard({
   policyId,
@@ -432,7 +645,7 @@ function DocumentsCard({
   );
 }
 
-// ── Skeleton / Error helpers ───────────────────────────────────────────
+// Skeleton / Error helpers
 
 function DetailSkeleton() {
   return (
