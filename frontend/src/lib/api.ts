@@ -989,3 +989,62 @@ export const markPolicyRenewed = (token: string, policyId: string) =>
     method: "POST",
     token,
   });
+
+// ── Document library (all documents across policies) ────────────────────────────
+
+export interface DocumentLibraryItem {
+  id: string;
+  file_name: string;
+  doc_type: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_at: string;
+  download_url: string;
+  policy_id: string;
+  policy_title: string;
+  policy_category: string;
+  snippet: string | null; // matched content snippet when searching inside documents
+}
+
+export const getAllDocuments = (
+  token: string,
+  params?: { search?: string; doc_type?: string; limit?: number; offset?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.doc_type) qs.set("doc_type", params.doc_type);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<DocumentLibraryItem[]>(`/documents${query}`, { token });
+};
+
+// ── Notifications (in-app bell) ─────────────────────────────────────────────────
+
+export interface NotificationItem {
+  id: string;
+  type: string; // "alert" | "approval"
+  title: string;
+  subtitle: string | null;
+  href: string;
+  created_at: string;
+}
+
+export interface NotificationFeed {
+  unread_count: number;
+  items: NotificationItem[];
+}
+
+export const getNotifications = (token: string) =>
+  apiFetch<NotificationFeed>("/notifications", { token, silent: true });
+
+// ── Subscription lifecycle (cancel / pause / resume) ────────────────────────────
+
+export const cancelSubscription = (token: string) =>
+  apiFetch<SubscriptionRead>("/billing/cancel", { method: "POST", token });
+
+export const pauseSubscription = (token: string) =>
+  apiFetch<SubscriptionRead>("/billing/pause", { method: "POST", token });
+
+export const resumeSubscription = (token: string) =>
+  apiFetch<SubscriptionRead>("/billing/resume", { method: "POST", token });
