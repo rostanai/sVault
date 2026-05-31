@@ -6,6 +6,8 @@ import {
   updateUser,
   getInvitations,
   createInvitation,
+  downloadDataExport,
+  sendDigestNow,
   type ProfileRead,
   type InvitationRead,
 } from "@/lib/api";
@@ -54,6 +56,9 @@ import {
   Check,
   Clock,
   Loader2,
+  Download,
+  Mail,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDate } from "@/lib/utils";
@@ -205,6 +210,9 @@ export default function SettingsClient({ token, currentUserRole }: Props) {
           </CardContent>
         </Card>
       )}
+
+      {/* Your data & privacy */}
+      <YourDataCard token={token} />
     </div>
   );
 }
@@ -483,6 +491,135 @@ function InviteDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── YourDataCard ───────────────────────────────────────────────────────────────
+
+interface DigestResult {
+  sent: boolean;
+  recipient: string | null;
+  policies: number;
+}
+
+function YourDataCard({ token }: { token: string }) {
+  const [exportLoading, setExportLoading] = useState(false);
+  const [digestLoading, setDigestLoading] = useState(false);
+
+  async function handleExport() {
+    setExportLoading(true);
+    try {
+      await downloadDataExport(token);
+      toast.success("Your data export has downloaded.");
+    } catch {
+      // downloadDataExport (via apiFetch) already toasted the error.
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  async function handleDigest() {
+    setDigestLoading(true);
+    try {
+      const res = (await sendDigestNow(token)) as DigestResult;
+      if (res.sent) {
+        toast.success(
+          `Digest sent${res.recipient ? " to " + res.recipient : ""} — ${res.policies} upcoming renewal(s).`
+        );
+      } else {
+        toast.info("No email on file to send to.");
+      }
+    } catch {
+      // sendDigestNow (via apiFetch) already toasted the error.
+    } finally {
+      setDigestLoading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-3 pb-3">
+        <ShieldCheck
+          className="h-5 w-5 text-zinc-500 dark:text-zinc-400 shrink-0"
+          aria-hidden="true"
+        />
+        <div>
+          <CardTitle className="text-sm font-semibold">
+            Your data &amp; privacy
+          </CardTitle>
+          <CardDescription className="text-xs mt-0.5">
+            DPDP data-portability and communication preferences.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Export your data */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium leading-none">Export your data</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">
+              Download a JSON copy of all your organisation&apos;s data —
+              policies, providers, documents metadata, approvals, and team.
+              (DPDP data-portability)
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exportLoading}
+            aria-label="Download a JSON export of your organisation data"
+            className="shrink-0"
+          >
+            {exportLoading ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Downloading…
+              </>
+            ) : (
+              <>
+                <Download className="mr-1.5 h-4 w-4" />
+                Download export
+              </>
+            )}
+          </Button>
+        </div>
+
+        <div className="border-t border-zinc-100 dark:border-zinc-800" />
+
+        {/* Email digest */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium leading-none">
+              Email me a renewal digest
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">
+              Send yourself a summary of policies expiring in the next 30 days.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDigest}
+            disabled={digestLoading}
+            aria-label="Send a renewal digest email to yourself"
+            className="shrink-0"
+          >
+            {digestLoading ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Sending…
+              </>
+            ) : (
+              <>
+                <Mail className="mr-1.5 h-4 w-4" />
+                Send digest
+              </>
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
