@@ -641,3 +641,27 @@
   - `api_router.include_router(webhooks.router)  # M7 outbound webhooks`
 - Permission used: `apikey:manage` (Admin-only, already in the matrix) — webhook management is a developer-integration control colocated with API key management.
 - Results: ruff clean (all files), 306/306 tests pass (up from 269 baseline; 37 new tests added across webhooks + existing test files from prior waves).
+
+### 2026-05-31 — api-engineer — onboarding status + notification history endpoints
+
+- Did: Built two read-only endpoints as requested.
+
+**Feature 1 — GET /onboarding/status**
+- New files:
+  - `backend/app/schemas/onboarding.py`: `OnboardingStep`, `OnboardingStatus`.
+  - `backend/app/services/onboarding_service.py`: `get_status(db, user)` — runs 5–7 cheap COUNT queries (tenant + org-scoped, mirroring policy_service scoping). Steps: provider, policy, document, alert (rule_count with alert fallback), team (profile > 1 OR invitation exists).
+  - `backend/app/api/v1/onboarding.py`: `GET /onboarding/status`, any authenticated user, full OpenAPI docstring.
+  - `backend/tests/test_onboarding.py`: 9 tests — 401 guard, all-done, none-done, partial, complete flag, completed_count, no-tenant (no DB hit), team via invitation, step metadata.
+
+**Feature 2 — GET /notifications/history?limit=50&offset=0**
+- Files edited:
+  - `backend/app/schemas/notification.py`: added `NotificationHistory` schema (items, limit, offset, total).
+  - `backend/app/services/notification_feed_service.py`: extracted shared helpers `_alert_item`, `_approval_item`, `_resolve_policy_titles`; added `get_history(db, user, limit, offset)` — all alerts + all approvals any status, paginated.
+  - `backend/app/api/v1/notifications.py`: added `GET /notifications/history` route to existing router (no router.py change needed).
+  - `backend/tests/test_notifications_feed.py`: 6 new tests — 401 guard, acknowledged/decided items included, newest-first ordering, limit/offset pagination, no-tenant empty, total is pre-pagination count.
+
+- NOT edited: `app/api/v1/router.py` (as instructed for onboarding; notifications already registered).
+- router.py include lines for onboarding (tech-lead to add):
+  - `from app.api.v1 import onboarding`
+  - `api_router.include_router(onboarding.router)  # first-run checklist`
+- Results: ruff clean, 332/332 tests pass (306 pre-existing + 22 new + 4 pre-existing history tests already in suite = net +26 passing).
