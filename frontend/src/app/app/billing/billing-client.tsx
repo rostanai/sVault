@@ -7,6 +7,7 @@ import {
   getInvoices,
   getPlans,
   getSubscription,
+  getUsage,
   pauseSubscription,
   resumeSubscription,
   subscribe,
@@ -14,6 +15,8 @@ import {
   type PlanRead,
   type SubscriptionRead,
   type SubscriptionWithEntitlements,
+  type UsageMetric,
+  type UsageResponse,
 } from "@/lib/api";
 import { formatDate, formatINR } from "@/lib/utils";
 import {
@@ -65,6 +68,8 @@ export default function BillingClient({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [upgradingPlanId, setUpgradingPlanId] = useState<string | null>(null);
+  const [usageData, setUsageData] = useState<UsageResponse | null>(null);
+  const [usageLoading, setUsageLoading] = useState(true);
 
   const refreshSubscription = useCallback(() => {
     getSubscription(token)
@@ -89,6 +94,11 @@ export default function BillingClient({ token }: Props) {
     getInvoices(token)
       .then(setInvoices)
       .catch(() => setInvoices([]));
+    // Usage is best-effort — a failure must never break the rest of the page.
+    getUsage(token)
+      .then(setUsageData)
+      .catch(() => setUsageData(null))
+      .finally(() => setUsageLoading(false));
   }, [token]);
 
   async function handleUpgrade(plan: PlanRead) {
@@ -246,6 +256,9 @@ export default function BillingClient({ token }: Props) {
           </Card>
         )}
 
+        {/* Plan usage meter */}
+        <PlanUsageCard usageData={usageData} usageLoading={usageLoading} />
+
         {/* Trial banner */}
         {isTrialing && trialDaysLeft != null && trialDaysLeft <= 7 && (
           <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950">
@@ -258,7 +271,7 @@ export default function BillingClient({ token }: Props) {
         )}
 
         {/* Plans */}
-        <div>
+        <div id="available-plans">
           <h3 className="mb-4 text-base font-semibold">Available Plans</h3>
           {plans.length === 0 ? (
             <p className="text-sm text-zinc-400">No plans available.</p>
@@ -519,6 +532,162 @@ function SubscriptionStatusBadge({ status }: { status: string }) {
     <Badge variant={variants[status] ?? "secondary"} className="capitalize">
       {status.replace(/_/g, " ")}
     </Badge>
+  );
+}
+
+// ── Plan Usage Card ──────────────────────────────────────────────────
+
+const USAGE_METRIC_LABELS: { key: string; label: string }[] = [
+  { key: "policies",     label: "Policies" },
+  { key: "users",        label: "Team members" },
+  { key: "documents",    label: "Documents" },
+  { key: "alerts_month", label: "Alerts this month" },
+];
+
+function UsageMeterRow({
+  label,
+  metric,
+}: {
+  label: string;
+  metric: UsageMetric;
+}) {
+  const { used, limit } = metric;
+  const isUnlimited = limit === -1;
+  const ratio = isUnlimited ? 0 : limit === 0 ? 1 : used / limit;
+  const pct = Math.min(100, Math.round(ratio * 100));
+
+  const barColor = isUnlimited
+    ? "bg-zinc-200 dark:bg-zinc-700"
+    : ratio >= 1
+    ? "bg-red-500"
+    : ratio >= 0.8
+    ? "bg-amber-400"
+    : "bg-brand-600";
+
+  const ariaLabel = isUnlimited
+    ? `${label}: ${used} used, unlimited`
+    : `${label}: ${used} of ${limit} used`;
+
+  const atCap = !isUnlimited && ratio >= 1;
+  const nearCap = !isUnlimited && ratio >= 0.8 && ratio < 1;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+          {label}
+        </span>
+        <span
+          className={
+            atCap
+              ? "text-red-600 dark:text-red-400"
+              : nearCap
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-zinc-500 dark:text-zinc-400"
+          }
+        >
+          {isUnlimited ? (
+            <>
+              {used.toLocaleString()}{" "}
+              <span className="text-zinc-400 dark:text-zinc-500">
+                / Unlimited
+              </span>
+            </>
+          ) : (
+            `${used.toLocaleString()} / ${limit.toLocaleString()}`
+          )}
+        </span>
+      </div>
+
+      {/* Progress bar — omit track for unlimited, show a subtle static bar instead */}
+      <div
+        role="progressbar"
+        aria-label={ariaLabel}
+        aria-valuenow={isUnlimited ? undefined : pct}
+        aria-valuemin={isUnlimited ? undefined : 0}
+        aria-valuemax={isUnlimited ? undefined : 100}
+        className="h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800"
+      >
+        <div
+          className={`h-full rounded-full transition-all ${barColor}`}
+          style={{ width: isUnlimited ? "100%" : `${pct}%` }}
+        />
+      </div>
+
+      {/* Inline "Limit reached" or "Upgrade for more" cue */}
+      {atCap && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          Limit reached —{" "}
+          <a
+            href="#available-plans"
+            className="underline underline-offset-2 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
+          >
+            upgrade your plan
+          </a>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PlanUsageCard({
+  usageData,
+  usageLoading,
+}: {
+  usageData: UsageResponse | null;
+  usageLoading: boolean;
+}) {
+  // While loading: show skeleton card.
+  if (usageLoading) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <Skeleton className="h-4 w-48" />
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="space-y-1.5">
+              <div className="flex justify-between">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-20" />
+              </div>
+              <Skeleton className="h-2 w-full rounded-full" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // On error (usageData is null after loading): render nothing silently.
+  if (!usageData) return null;
+
+  const tierLabel =
+    usageData.plan_tier.charAt(0).toUpperCase() +
+    usageData.plan_tier.slice(1).toLowerCase();
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-semibold">Plan Usage</CardTitle>
+        <CardDescription>
+          On the{" "}
+          <span className="font-medium text-zinc-700 dark:text-zinc-200">
+            {tierLabel}
+          </span>{" "}
+          plan
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {USAGE_METRIC_LABELS.map(({ key, label }) => {
+          const metric = usageData.usage[key];
+          if (!metric) return null;
+          return (
+            <UsageMeterRow key={key} label={label} metric={metric} />
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
