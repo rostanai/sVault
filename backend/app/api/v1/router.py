@@ -15,6 +15,7 @@ from app.api.v1 import (
     exports,
     health,
     imports,
+    installments,
     intake,
     invitations,
     notifications,
@@ -56,3 +57,5 @@ api_router.include_router(notifications.router)     # in-app notification feed
 api_router.include_router(webhooks.router)          # M7 outbound webhooks
 api_router.include_router(onboarding.router)        # first-run checklist
 api_router.include_router(calendar.router)          # iCalendar (.ics) renewal feed
+api_router.include_router(installments.router)      # policy premium installments
+api_router.include_router(providers.contact_router) # provider contact-log DELETE
