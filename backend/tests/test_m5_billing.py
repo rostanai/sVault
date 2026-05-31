@@ -1268,3 +1268,226 @@ async def test_lifecycle_endpoints_require_auth(path):
         resp = await ac.post(path)
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "unauthorized"
+
+
+# ---------------------------------------------------------------------------
+# 12. Usage / metering — GET /billing/usage
+# ---------------------------------------------------------------------------
+
+class TestGetUsageService:
+    """Service-level tests for usage_service.get_usage — stubs all DB calls."""
+
+    def _make_db(
+        self,
+        sub=None,
+        plan=None,
+        policies_count: int = 0,
+        users_count: int = 0,
+        documents_count: int = 0,
+        alerts_count: int = 0,
+    ) -> AsyncMock:
+        """Build an AsyncMock DB whose execute calls return the given stubs in order.
+
+        Call sequence inside get_usage:
+          1. SELECT Subscription WHERE tenant_id = ?
+          2. SELECT Plan WHERE id = ?  (only when sub exists and has plan_id)
+          3. get_entitlements (re-enters: SELECT Subscription, then optionally SELECT Plan)
+          4. COUNT policies
+          5. COUNT profiles (users)
+          6. COUNT policy_documents
+          7. COUNT alerts
+        """
+
+        def _scalar_result(val):
+            r = MagicMock()
+            r.scalar_one_or_none = MagicMock(return_value=val)
+            r.scalar_one = MagicMock(return_value=val)
+            return r
+
+        db = AsyncMock()
+        # Build the call sequence for db.execute:
+        # get_usage owns calls 1-2 (sub + plan for tier); get_entitlements re-queries (calls 3-4);
+        # then the 4 COUNT queries.
+        calls = []
+
+        # call 1: sub lookup in get_usage
+        calls.append(_scalar_result(sub))
+        # call 2: plan lookup for tier in get_usage (only when sub has plan_id)
+        has_plan_id = getattr(sub, "plan_id", None) is not None
+        not_trialing = sub is not None and sub.status != "trialing"
+        if sub is not None and has_plan_id and not_trialing:
+            calls.append(_scalar_result(plan))
+        # calls for get_entitlements (re-queries sub and optionally plan)
+        calls.append(_scalar_result(sub))  # sub lookup inside get_entitlements
+        ents_has_plan = (
+            sub is not None
+            and sub.status not in ("trialing", "cancelled", "expired")
+            and has_plan_id
+        )
+        if ents_has_plan:
+            calls.append(_scalar_result(plan))  # plan lookup inside get_entitlements
+        # COUNT queries
+        calls.append(_scalar_result(policies_count))
+        calls.append(_scalar_result(users_count))
+        calls.append(_scalar_result(documents_count))
+        calls.append(_scalar_result(alerts_count))
+
+        db.execute = AsyncMock(side_effect=calls)
+        return db
+
+    @pytest.mark.asyncio
+    async def test_free_tier_returns_correct_limits(self):
+        """No subscription → free-tier limits; usage zeros come through."""
+        from app.services.usage_service import get_usage
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        db = self._make_db(
+            sub=None, policies_count=3, users_count=1, documents_count=5, alerts_count=10
+        )
+
+        result = await get_usage(db, tenant_id)
+
+        assert result.plan_tier == "free"
+        assert result.status == "none"
+        assert result.usage["policies"].used == 3
+        assert result.usage["policies"].limit == 10       # FREE: 10
+        assert result.usage["users"].used == 1
+        assert result.usage["users"].limit == 1           # FREE: 1
+        assert result.usage["documents"].used == 5
+        assert result.usage["documents"].limit == 20      # FREE: 20
+        assert result.usage["alerts_month"].used == 10
+        assert result.usage["alerts_month"].limit == 200  # FREE: 200
+
+    @pytest.mark.asyncio
+    async def test_trialing_returns_pro_limits(self):
+        """Trialing sub → plan_tier='trialing', Pro-level limits (unlimited for policies)."""
+        from app.services.usage_service import get_usage
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+        sub = MagicMock()
+        sub.status = "trialing"
+        sub.plan_id = None
+        sub.tenant_id = tenant_id
+
+        db = self._make_db(
+            sub=sub, policies_count=50, users_count=5,
+            documents_count=100, alerts_count=300,
+        )
+
+        result = await get_usage(db, tenant_id)
+
+        assert result.plan_tier == "trialing"
+        assert result.status == "trialing"
+        assert result.usage["policies"].used == 50
+        assert result.usage["policies"].limit == -1       # PRO: unlimited
+        assert result.usage["users"].used == 5
+        assert result.usage["users"].limit == 15          # PRO: 15
+        assert result.usage["documents"].limit == -1      # PRO: unlimited
+        assert result.usage["alerts_month"].limit == -1   # PRO: unlimited
+
+    @pytest.mark.asyncio
+    async def test_active_plan_returns_plan_limits(self):
+        """Active sub with a linked plan → limits from plan.entitlements."""
+        from app.services.usage_service import get_usage
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        plan_id = uuid.UUID("00000000-0000-0000-0000-000000000010")
+
+        sub = MagicMock()
+        sub.status = "active"
+        sub.plan_id = plan_id
+        sub.tenant_id = tenant_id
+
+        mock_plan = MagicMock()
+        mock_plan.id = plan_id
+        mock_plan.tier = "starter"
+        mock_plan.is_active = True
+        mock_plan.entitlements = {
+            "features": {"email_alerts": True},
+            "limits": {"policies": 100, "users": 3, "alerts_month": 500, "documents": 200},
+        }
+
+        db = self._make_db(
+            sub=sub, plan=mock_plan,
+            policies_count=20, users_count=2, documents_count=40, alerts_count=50,
+        )
+
+        result = await get_usage(db, tenant_id)
+
+        assert result.plan_tier == "starter"
+        assert result.status == "active"
+        assert result.usage["policies"].used == 20
+        assert result.usage["policies"].limit == 100
+        assert result.usage["users"].used == 2
+        assert result.usage["users"].limit == 3
+        assert result.usage["documents"].used == 40
+        assert result.usage["documents"].limit == 200
+        assert result.usage["alerts_month"].used == 50
+        assert result.usage["alerts_month"].limit == 500
+
+    @pytest.mark.asyncio
+    async def test_unlimited_limit_passes_through_as_minus_one(self):
+        """Plans with -1 limit pass through correctly (unlimited entitlements)."""
+        from app.services.usage_service import get_usage
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        plan_id = uuid.UUID("00000000-0000-0000-0000-000000000020")
+
+        sub = MagicMock()
+        sub.status = "active"
+        sub.plan_id = plan_id
+        sub.tenant_id = tenant_id
+
+        mock_plan = MagicMock()
+        mock_plan.id = plan_id
+        mock_plan.tier = "professional"
+        mock_plan.is_active = True
+        mock_plan.entitlements = {
+            "features": {},
+            "limits": {"policies": -1, "users": 15, "alerts_month": -1, "documents": -1},
+        }
+
+        db = self._make_db(
+            sub=sub, plan=mock_plan,
+            policies_count=999, users_count=14, documents_count=5000, alerts_count=9999,
+        )
+
+        result = await get_usage(db, tenant_id)
+
+        assert result.usage["policies"].limit == -1
+        assert result.usage["documents"].limit == -1
+        assert result.usage["alerts_month"].limit == -1
+        assert result.usage["users"].limit == 15   # explicit numeric limit passes through
+
+    @pytest.mark.asyncio
+    async def test_cancelled_sub_falls_back_to_free(self):
+        """Cancelled subscription → plan_tier='free', free limits apply."""
+        from app.services.usage_service import get_usage
+
+        tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+        sub = MagicMock()
+        sub.status = "cancelled"
+        sub.plan_id = uuid.UUID("00000000-0000-0000-0000-000000000010")
+        sub.tenant_id = tenant_id
+
+        db = self._make_db(
+            sub=sub, policies_count=1, users_count=1, documents_count=1, alerts_count=1
+        )
+
+        result = await get_usage(db, tenant_id)
+
+        assert result.status == "cancelled"
+        assert result.plan_tier == "free"
+        assert result.usage["policies"].limit == 10
+
+
+@pytest.mark.asyncio
+async def test_usage_endpoint_requires_auth():
+    """GET /billing/usage must return 401 without a bearer token."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/billing/usage")
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "unauthorized"

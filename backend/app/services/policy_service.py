@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import not_found
 from app.core.security import CurrentUser
 from app.db.models import Alert, Policy
-from app.schemas.policy import PolicyCreate, PolicyUpdate
+from app.schemas.policy import PolicyCreate, PolicyUpdate, RenewPolicyRequest
 from app.services.org_service import is_group_wide
 
 
@@ -104,6 +104,26 @@ async def delete_policy(db: AsyncSession, user: CurrentUser, policy_id: uuid.UUI
     await db.commit()
 
 
+async def _apply_mark_renewed(
+    db: AsyncSession, user: CurrentUser, policy: Policy
+) -> None:
+    """Mutate *policy* to 'renewed' and bulk-cancel its pending alerts.
+
+    Does NOT commit — callers are responsible for the commit so this can be
+    composed inside a larger transaction (e.g. renew()).
+    """
+    policy.status = "renewed"
+    await db.execute(
+        update(Alert)
+        .where(
+            Alert.policy_id == policy.id,
+            Alert.tenant_id == uuid.UUID(user.tenant_id),
+            Alert.status.in_(["scheduled", "sent"]),
+        )
+        .values(status="cancelled")
+    )
+
+
 async def mark_renewed(
     db: AsyncSession, user: CurrentUser, policy_id: uuid.UUID
 ) -> Policy:
@@ -116,20 +136,77 @@ async def mark_renewed(
     Scoping: tenant + org filtering via get_policy (raises not_found for out-of-scope).
     """
     policy = await get_policy(db, user, policy_id)  # scope-checked; raises if not accessible
-
-    policy.status = "renewed"
-
-    # Cancel all pending/sent alerts for this policy in bulk.
-    await db.execute(
-        update(Alert)
-        .where(
-            Alert.policy_id == policy_id,
-            Alert.tenant_id == uuid.UUID(user.tenant_id),
-            Alert.status.in_(["scheduled", "sent"]),
-        )
-        .values(status="cancelled")
-    )
-
+    await _apply_mark_renewed(db, user, policy)
     await db.commit()
     await db.refresh(policy)
     return policy
+
+
+async def renew(
+    db: AsyncSession,
+    user: CurrentUser,
+    policy_id: uuid.UUID,
+    payload: RenewPolicyRequest,
+) -> Policy:
+    """Create a renewal policy for the next term and mark the source as renewed.
+
+    Steps:
+    1. Load and scope-check the source policy (404 if not accessible).
+    2. Build a new Policy row carrying over org_id, category, title, provider_id,
+       owner_id, and policy_number from the source; override any fields the caller
+       supplies in the payload.  inception_date defaults to the source's expiry_date
+       (continuous cover) when not provided.  status = "active".  prev_policy_id
+       points to the source.
+    3. Persist the new policy (flush to get its id).
+    4. Mark the SOURCE as renewed (status=renewed + cancel pending alerts) within
+       the same session — commit once.
+    5. Return the NEW policy.
+    """
+    source = await get_policy(db, user, policy_id)
+
+    _policy_number = (
+        payload.policy_number
+        if payload.policy_number is not None
+        else source.policy_number
+    )
+    _sum_insured = (
+        payload.sum_insured_inr
+        if payload.sum_insured_inr is not None
+        else source.sum_insured_inr
+    )
+    _inception = (
+        payload.inception_date
+        if payload.inception_date is not None
+        else source.expiry_date  # continuous cover default
+    )
+
+    new_policy = Policy(
+        tenant_id=uuid.UUID(user.tenant_id),
+        org_id=source.org_id,
+        category=source.category,
+        title=source.title,
+        policy_number=_policy_number,
+        provider_id=source.provider_id,
+        owner_id=source.owner_id,
+        sum_insured_inr=_sum_insured,
+        premium_inr=payload.premium_inr
+        if payload.premium_inr is not None
+        else source.premium_inr,
+        gst_inr=payload.gst_inr if payload.gst_inr is not None else source.gst_inr,
+        inception_date=_inception,
+        expiry_date=payload.expiry_date,
+        renewal_date=payload.renewal_date,
+        status="active",
+        prev_policy_id=source.id,
+        custom_fields=source.custom_fields or {},
+        created_by=uuid.UUID(user.user_id),
+    )
+    db.add(new_policy)
+    await db.flush()  # assign new_policy.id without committing
+
+    # Mark the source renewed + cancel its pending alerts within the same transaction.
+    await _apply_mark_renewed(db, user, source)
+
+    await db.commit()
+    await db.refresh(new_policy)
+    return new_policy

@@ -25,6 +25,7 @@ import {
   Sparkles,
   CheckSquare,
   FileBarChart,
+  Code2,
   Menu,
   X,
   LogOut,
@@ -56,6 +57,7 @@ const navItems: NavItem[] = [
   { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
   { label: "Alerts", href: "/app/alerts", icon: Bell },
   { label: "Reports", href: "/app/reports", icon: FileBarChart },
+  { label: "Developer", href: "/app/developer", icon: Code2 },
   { label: "Billing", href: "/app/billing", icon: CreditCard },
   { label: "Settings", href: "/app/settings", icon: Settings },
 ];

@@ -142,6 +142,23 @@ async def scan_and_dispatch(db: AsyncSession, today: date | None = None) -> dict
                 await dispatch_alert(db, alert)
                 dispatched += 1
 
+                # Fire webhook event — best-effort; never block the engine.
+                try:
+                    from app.services import webhook_service  # lazy import avoids cycles
+
+                    await webhook_service.deliver(
+                        db,
+                        p.tenant_id,
+                        "renewal.due",
+                        {
+                            "policy_id": str(p.id),
+                            "lead_day": d,
+                            "scheduled_for": str(today),
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
                 # Escalation: when the rule says escalate=True AND this is a final
                 # reminder (lead_day <= ESCALATION_LEAD_THRESHOLD) AND the alert was
                 # not already acknowledged, also notify a manager/admin in the tenant.

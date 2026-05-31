@@ -139,6 +139,31 @@ class TenantRead(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Usage / metering
+# ---------------------------------------------------------------------------
+
+class UsageMetric(BaseModel):
+    """A single usage dimension: current count vs plan limit (-1 = unlimited)."""
+
+    used: int
+    limit: int  # -1 = unlimited
+
+
+class UsageResponse(BaseModel):
+    """Current resource usage for the authenticated tenant vs plan limits.
+
+    ``plan_tier`` is the effective tier string (e.g. "professional", "trialing", "free").
+    ``status`` is the raw subscription status from the DB, or "none" when no
+    subscription row exists.
+    ``usage`` keys: policies, users, documents, alerts_month.
+    """
+
+    plan_tier: str
+    status: str
+    usage: dict[str, UsageMetric]
+
+
+# ---------------------------------------------------------------------------
 # Platform analytics
 # ---------------------------------------------------------------------------
 

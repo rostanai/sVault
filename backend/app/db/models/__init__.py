@@ -30,6 +30,7 @@ from app.db.models.tenancy import (  # noqa: F401
     Profile,
     Tenant,
 )
+from app.db.models.webhooks import Webhook  # noqa: F401
 
 __all__ = [
     "Tenant", "Organization", "Profile", "Invitation",
@@ -38,4 +39,5 @@ __all__ = [
     "AlertRule", "Alert", "NotificationLog",
     "Approval",
     "ApiKey",
+    "Webhook",
 ]

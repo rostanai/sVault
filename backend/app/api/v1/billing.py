@@ -32,8 +32,9 @@ from app.schemas.billing import (
     SubscribeResponse,
     SubscriptionRead,
     SubscriptionWithEntitlements,
+    UsageResponse,
 )
-from app.services import subscription_service
+from app.services import subscription_service, usage_service
 from app.services.entitlements import get_entitlements
 
 log = logging.getLogger("svault.billing")
@@ -108,6 +109,22 @@ async def get_subscription(
         subscription=SubscriptionRead.model_validate(sub) if sub else None,
         entitlements=ents,
     )
+
+
+@router.get("/billing/usage", response_model=UsageResponse)
+async def get_usage(
+    user: CurrentUser = Depends(_authed),
+    db: AsyncSession = Depends(get_db),
+) -> UsageResponse:
+    """Return current resource usage vs plan limits for the authenticated tenant.
+
+    Any authenticated user may call this endpoint (read-only, tenant-scoped).
+    Returns the 4 metered dimensions — policies, users, documents, alerts_month —
+    each with their current count and plan limit (-1 = unlimited).
+    """
+    if not user.tenant_id:
+        raise AppError(ErrorCode.unauthorized, "No tenant context")
+    return await usage_service.get_usage(db, user.tenant_id)
 
 
 @router.get("/billing/invoices", response_model=list[InvoiceRead])

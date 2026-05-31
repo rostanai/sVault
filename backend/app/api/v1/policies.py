@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.authz import require_permission
 from app.core.security import CurrentUser
 from app.db.session import get_db
-from app.schemas.policy import PolicyCreate, PolicyRead, PolicyUpdate
+from app.schemas.policy import PolicyCreate, PolicyRead, PolicyUpdate, RenewPolicyRequest
 from app.services import policy_service
 
 router = APIRouter(prefix="/policies", tags=["policies"])
@@ -80,3 +80,27 @@ async def mark_policy_renewed(
     Requires policy:update permission. Tenant- and org-scoped (404 if not accessible).
     """
     return await policy_service.mark_renewed(db, user, policy_id)
+
+
+@router.post("/{policy_id}/renew", response_model=PolicyRead, status_code=201)
+async def renew_policy(
+    policy_id: uuid.UUID,
+    payload: RenewPolicyRequest,
+    user: CurrentUser = Depends(_create),
+    db: AsyncSession = Depends(get_db),
+) -> PolicyRead:
+    """Create a renewal policy for the next term and mark the source as renewed.
+
+    Carries over org_id, category, title, provider_id, owner_id, and policy_number
+    from the source policy. The caller must supply the new expiry_date; all other
+    fields (inception_date, premium_inr, gst_inr, sum_insured_inr, policy_number)
+    are optional overrides — omitted values fall back to source policy values.
+    inception_date defaults to the source policy's expiry_date (continuous cover).
+
+    The new policy's prev_policy_id links back to the source. The source is atomically
+    marked as status=renewed and all its pending/sent alerts are cancelled.
+
+    Requires policy:create permission. Returns the newly created renewal policy (201).
+    Tenant- and org-scoped: 404 for cross-tenant or inaccessible source policies.
+    """
+    return await policy_service.renew(db, user, policy_id, payload)
