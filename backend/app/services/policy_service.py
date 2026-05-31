@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_found
 from app.core.security import CurrentUser
-from app.db.models import Policy
+from app.db.models import Alert, Policy
 from app.schemas.policy import PolicyCreate, PolicyUpdate
 from app.services.org_service import is_group_wide
 
@@ -102,3 +102,34 @@ async def delete_policy(db: AsyncSession, user: CurrentUser, policy_id: uuid.UUI
     policy = await get_policy(db, user, policy_id)
     await db.delete(policy)
     await db.commit()
+
+
+async def mark_renewed(
+    db: AsyncSession, user: CurrentUser, policy_id: uuid.UUID
+) -> Policy:
+    """Set policy status to 'renewed' and cancel all pending alerts for that policy.
+
+    'Pending' alerts are those with status in ('scheduled', 'sent') — i.e., not yet
+    acknowledged, not already cancelled/failed.  This uses a bulk UPDATE so that the
+    notification_log history is preserved unchanged (only the alert row status changes).
+
+    Scoping: tenant + org filtering via get_policy (raises not_found for out-of-scope).
+    """
+    policy = await get_policy(db, user, policy_id)  # scope-checked; raises if not accessible
+
+    policy.status = "renewed"
+
+    # Cancel all pending/sent alerts for this policy in bulk.
+    await db.execute(
+        update(Alert)
+        .where(
+            Alert.policy_id == policy_id,
+            Alert.tenant_id == uuid.UUID(user.tenant_id),
+            Alert.status.in_(["scheduled", "sent"]),
+        )
+        .values(status="cancelled")
+    )
+
+    await db.commit()
+    await db.refresh(policy)
+    return policy
