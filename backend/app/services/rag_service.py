@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.security import CurrentUser
 from app.db.models import Policy, PolicyDocument
+from app.services import secrets_service
 from app.services.org_service import is_group_wide
 
 log = logging.getLogger("svault.rag")
@@ -129,7 +130,11 @@ async def _retrieve(db: AsyncSession, user: CurrentUser, question: str, limit: i
 
 
 async def ask(db: AsyncSession, user: CurrentUser, question: str) -> dict:
-    if not settings.svault_ai_api_key:
+    # Resolve the key from platform_settings (Super-Admin console) → env fallback.
+    api_key = await secrets_service.get_secret(
+        db, "svault_ai_api_key", settings.svault_ai_api_key
+    )
+    if not api_key:
         raise AppError(ErrorCode.internal_error, "sVault AI is not configured")
     rows = await _retrieve(db, user, question)
     if not rows:
@@ -140,7 +145,7 @@ async def ask(db: AsyncSession, user: CurrentUser, question: str) -> dict:
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
-            api_key=settings.svault_ai_api_key, base_url=settings.svault_ai_base_url
+            api_key=api_key, base_url=settings.svault_ai_base_url
         )
         resp = await client.chat.completions.create(
             model=settings.svault_ai_model,

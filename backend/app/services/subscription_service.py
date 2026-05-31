@@ -40,6 +40,7 @@ from app.core import razorpay as rzp
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode, not_found
 from app.db.models.billing import BillingEvent, Invoice, Plan, Subscription
+from app.services import secrets_service
 
 log = logging.getLogger("svault.subscription")
 
@@ -115,7 +116,11 @@ async def start_or_update_subscription(
     sub: Subscription | None = await get_current(db, tid)
 
     # Determine which branch to take BEFORE mutating the subscription row.
-    use_real_razorpay: bool = bool(settings.razorpay_key_id and plan.razorpay_plan_id)
+    # Resolve the Razorpay key from platform_settings (Super-Admin) → env fallback.
+    razorpay_key_id = await secrets_service.get_secret(
+        db, "razorpay_key_id", settings.razorpay_key_id
+    )
+    use_real_razorpay: bool = bool(razorpay_key_id and plan.razorpay_plan_id)
 
     if sub is None:
         if use_real_razorpay:
