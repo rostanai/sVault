@@ -3,6 +3,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     alerts,
+    api_keys,
     approvals,
     ask,
     auth,
@@ -10,11 +11,13 @@ from app.api.v1 import (
     dashboard,
     documents,
     health,
+    intake,
     invitations,
     orgs,
     platform,
     policies,
     providers,
+    public,
     users,
 )
 
@@ -34,3 +37,6 @@ api_router.include_router(platform.router)      # M5
 
 api_router.include_router(approvals.router)     # M6 approvals
 api_router.include_router(ask.router)           # AI "Ask sVault" (RAG)
+api_router.include_router(intake.router)        # AI policy auto-intake (extract)
+api_router.include_router(api_keys.router)      # M7 developer API key management
+api_router.include_router(public.router)        # M7 public developer API (API-key auth)

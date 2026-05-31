@@ -9,6 +9,7 @@ from app.db.models.alerts import (  # noqa: F401
     AlertRule,
     NotificationLog,
 )
+from app.db.models.api_keys import ApiKey  # noqa: F401
 from app.db.models.approvals import Approval  # noqa: F401
 from app.db.models.billing import (  # noqa: F401
     BillingEvent,
@@ -36,4 +37,5 @@ __all__ = [
     "Provider", "Policy", "PolicyDocument",
     "AlertRule", "Alert", "NotificationLog",
     "Approval",
+    "ApiKey",
 ]
