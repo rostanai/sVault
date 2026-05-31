@@ -84,4 +84,22 @@ class PolicyRead(BaseModel):
     expiry_date: date | None
     renewal_date: date | None
     status: str
+    prev_policy_id: uuid.UUID | None = None
     created_at: datetime
+
+
+class RenewPolicyRequest(BaseModel):
+    """Payload for POST /policies/{policy_id}/renew.
+
+    Required: expiry_date for the new term.
+    Optional fields override the carried-over source values; omitted fields fall
+    back to the source policy values where applicable.
+    """
+
+    expiry_date: date
+    renewal_date: date | None = None
+    inception_date: date | None = None
+    premium_inr: Decimal | None = None
+    gst_inr: Decimal | None = None
+    sum_insured_inr: Decimal | None = None
+    policy_number: str | None = None
