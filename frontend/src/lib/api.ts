@@ -196,7 +196,22 @@ export interface PolicyRead {
   expiry_date: string | null;
   renewal_date: string | null;
   status: string;
+  custom_fields: Record<string, string>;
   created_at: string;
+}
+
+export interface PolicyUpdate {
+  title?: string;
+  policy_number?: string | null;
+  provider_id?: string | null;
+  sum_insured_inr?: string | null;
+  premium_inr?: string | null;
+  gst_inr?: string | null;
+  inception_date?: string | null;
+  expiry_date?: string | null;
+  renewal_date?: string | null;
+  status?: string;
+  custom_fields?: Record<string, string>;
 }
 
 export interface PolicyCreate {
@@ -1297,3 +1312,31 @@ export interface GroupDashboardResponse {
 
 export const getGroupDashboard = (token: string) =>
   apiFetch<GroupDashboardResponse>("/dashboard/group", { token });
+
+// ── Policy edit (standard fields + custom fields) ───────────────────────────────
+
+export const updatePolicy = (
+  token: string,
+  policyId: string,
+  body: PolicyUpdate
+) =>
+  apiFetch<PolicyRead>(`/policies/${policyId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+
+// ── DPDP / account data export ──────────────────────────────────────────────────
+
+/** Download a JSON export of all the tenant's data (DPDP data-principal request). */
+export const downloadDataExport = (token: string) =>
+  downloadAuthed(token, "/account/export", "svault-data-export.json");
+
+// ── Weekly renewal digest (send now) ────────────────────────────────────────────
+
+/** Send the current weekly renewal digest email to the caller (test/on-demand). */
+export const sendDigestNow = (token: string) =>
+  apiFetch<{ sent: boolean; recipient: string | null; policies: number }>(
+    "/digests/send-me",
+    { method: "POST", token }
+  );
