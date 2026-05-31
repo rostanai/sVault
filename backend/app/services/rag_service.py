@@ -20,7 +20,7 @@ from app.core import storage
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.security import CurrentUser
-from app.db.models import Policy, PolicyDocument
+from app.db.models import PolicyDocument
 from app.services import secrets_service
 from app.services.org_service import is_group_wide
 
@@ -71,9 +71,15 @@ def _extract_text(raw: bytes, mime: str | None) -> str:
 async def ingest_document(db: AsyncSession, user: CurrentUser, document_id: uuid.UUID) -> int:
     """Download a policy document, extract text, chunk it, store rows in document_chunks."""
     doc = await db.get(PolicyDocument, document_id)
-    if doc is None or str(doc.tenant_id) != user.tenant_id:
+    if doc is None:
         raise AppError(ErrorCode.not_found, "Document not found")
-    policy = await db.get(Policy, doc.policy_id)
+    # Object-level scope: the document's policy must be accessible to the caller
+    # (tenant + org + owner). This closes a BOLA where a same-tenant user could pass
+    # an accessible policy_id in the URL but a document_id from a policy in another
+    # org / owned by someone else. Mirrors document_service.auto_process_document.
+    from app.services import policy_service
+
+    policy = await policy_service.get_policy(db, user, doc.policy_id)  # 404 if not scoped
 
     url = await storage.create_signed_download_url(doc.storage_path)
     try:
