@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import CurrentUser
@@ -59,16 +59,29 @@ async def get_dashboard(db: AsyncSession, user: CurrentUser) -> dict:
         ).all()
     ]
 
-    async def _bucket(days: int) -> int:
-        stmt = _scoped(select(func.count(Policy.id)), user).where(
-            Policy.expiry_date >= today,
-            Policy.expiry_date <= today + timedelta(days=days),
-            Policy.status.in_(ALERTABLE_STATUSES),
+    # Expiry buckets (next 30/60/90 days) in a SINGLE query via conditional counts,
+    # instead of three sequential COUNT round-trips. Each window is cumulative-from-today.
+    def _bucket_expr(days: int):
+        return func.count(
+            case(
+                (
+                    (Policy.expiry_date >= today)
+                    & (Policy.expiry_date <= today + timedelta(days=days))
+                    & Policy.status.in_(ALERTABLE_STATUSES),
+                    Policy.id,
+                ),
+                else_=None,
+            )
         )
-        return (await db.execute(stmt)).scalar_one()
 
-    expiring = {"next_30": await _bucket(30), "next_60": await _bucket(60),
-                "next_90": await _bucket(90)}
+    b30, b60, b90 = (
+        await db.execute(
+            _scoped(
+                select(_bucket_expr(30), _bucket_expr(60), _bucket_expr(90)), user
+            )
+        )
+    ).one()
+    expiring = {"next_30": b30, "next_60": b60, "next_90": b90}
 
     upcoming_rows = (
         await db.execute(

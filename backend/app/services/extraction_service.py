@@ -13,8 +13,6 @@ import json
 import logging
 from typing import get_args
 
-from openai import AsyncOpenAI
-
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.schemas.policy import PolicyCategory
@@ -145,6 +143,10 @@ async def extract_policy_fields(
     )
 
     try:
+        # Lazy import — keeps `openai` (and its httpx/anyio deps) off the cold-start path
+        # for requests that never extract. Mirrors rag_service.ask().
+        from openai import AsyncOpenAI
+
         client = AsyncOpenAI(
             api_key=resolved_key,
             base_url=settings.svault_ai_base_url,
