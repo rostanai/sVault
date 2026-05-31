@@ -11,7 +11,7 @@ from app.core.security import CurrentUser
 from app.db.models import Organization, Policy
 from app.schemas.dashboard import GroupDashboardResponse, OrgRollup, Totals
 from app.services.alert_engine import ALERTABLE_STATUSES, today_in_tz
-from app.services.policy_service import _accessible_org_filter
+from app.services.policy_service import _accessible_org_filter, _owner_filter
 
 
 def _scoped(stmt, user: CurrentUser):
@@ -19,6 +19,9 @@ def _scoped(stmt, user: CurrentUser):
     org = _accessible_org_filter(user)
     if org is not None:
         stmt = stmt.where(Policy.org_id == org)
+    # Object-level: an owner's aggregates cover only the policies they own.
+    if (oid := _owner_filter(user)) is not None:
+        stmt = stmt.where(Policy.owner_id == oid)
     return stmt
 
 
@@ -180,6 +183,10 @@ async def get_group_dashboard(
     )
     if accessible_org is not None:
         agg_stmt = agg_stmt.where(Policy.org_id == accessible_org)
+    # Object-level: for an owner the per-org rollup collapses to only their own
+    # policies (within their own org).
+    if (owner_oid := _owner_filter(user)) is not None:
+        agg_stmt = agg_stmt.where(Policy.owner_id == owner_oid)
 
     agg_rows = (await db.execute(agg_stmt)).all()
 
