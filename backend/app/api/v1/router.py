@@ -24,6 +24,7 @@ from app.api.v1 import (
     public,
     reports,
     users,
+    webhooks,
 )
 
 api_router = APIRouter()
@@ -50,3 +51,4 @@ api_router.include_router(imports.router)       # bulk policy import (CSV/XLSX)
 api_router.include_router(reports.router)       # renewal report (JSON)
 api_router.include_router(document_library.router)  # document library (cross-policy)
 api_router.include_router(notifications.router)     # in-app notification feed
+api_router.include_router(webhooks.router)          # M7 outbound webhooks
