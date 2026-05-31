@@ -30,6 +30,7 @@ from app.schemas.billing import (
     PlanCreate,
     PlanRead,
     PlanUpdate,
+    PlatformAnalytics,
     SettingRead,
     SettingWrite,
     TenantRead,
@@ -48,6 +49,20 @@ def _actor_id(user: CurrentUser) -> uuid.UUID | None:
         return uuid.UUID(user.user_id) if user.user_id else None
     except ValueError:
         return None
+
+
+@router.get("/analytics", response_model=PlatformAnalytics)
+async def platform_analytics(
+    _: CurrentUser = Depends(_super),
+    db: AsyncSession = Depends(get_db),
+) -> PlatformAnalytics:
+    """Return platform-wide metrics for the Super Admin overview dashboard.
+
+    Includes tenant counts (total/active/suspended), subscription status breakdown,
+    active subscription counts by plan tier, and monthly recurring revenue (MRR) in INR.
+    Super Admin only — 404 for all non-super-admin callers.
+    """
+    return await platform_service.get_analytics(db)
 
 
 @router.get("/plans", response_model=list[PlanRead])
