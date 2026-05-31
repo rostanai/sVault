@@ -10,6 +10,7 @@ from app.api.v1 import (
     auth,
     billing,
     calendar,
+    claims,
     dashboard,
     digests,
     document_library,
@@ -63,3 +64,4 @@ api_router.include_router(installments.router)      # policy premium installment
 api_router.include_router(providers.contact_router) # provider contact-log DELETE
 api_router.include_router(digests.router)           # weekly renewal email digest
 api_router.include_router(account.router)           # DPDP data export
+api_router.include_router(claims.router)            # Claims module
