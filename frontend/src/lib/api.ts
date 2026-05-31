@@ -330,6 +330,8 @@ export interface SubscribeResponse {
   plan_id: string;
   razorpay_subscription_id: string | null;
   short_url: string | null;
+  /** false = activated immediately (no Razorpay); true = open checkout to pay. */
+  payment_required: boolean;
 }
 
 export const subscribe = (token: string, planId: string) =>
@@ -728,7 +730,7 @@ export async function extractPolicyFromDocument(
   return res.json() as Promise<PolicyExtraction>;
 }
 
-// ── Developer API keys ───────────────────────────────────────────────
+// ── Developer API keys ──────────────────────────────────────────────
 
 export interface ApiKeyRead {
   id: string;

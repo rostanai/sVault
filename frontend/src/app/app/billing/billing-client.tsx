@@ -82,9 +82,24 @@ export default function BillingClient({ token }: Props) {
     if (!token) return;
     setUpgradingPlanId(plan.id);
     try {
-      const result = await subscribe(token, plan.id);
+      // `payment_required` will be added to SubscribeResponse by the tech-lead.
+      // Cast locally so this file compiles against the current api.ts signature.
+      const result = await subscribe(token, plan.id) as Awaited<ReturnType<typeof subscribe>> & {
+        payment_required?: boolean;
+      };
 
-      if (result.razorpay_subscription_id) {
+      if (result.payment_required === false) {
+        // Immediate activation — no Razorpay required.
+        toast.success(`You're now on the ${plan.name} plan.`, {
+          description: "All plan features are now active.",
+          duration: 6000,
+        });
+        // Refresh subscription and plans so the "Current" badge + status card update.
+        refreshSubscription();
+        getPlans(token)
+          .then(setPlans)
+          .catch(() => {/* silent */});
+      } else if (result.razorpay_subscription_id) {
         // Prefer the Razorpay in-app checkout widget.
         if (typeof window.Razorpay !== "undefined") {
           const rzp = new window.Razorpay({
@@ -116,7 +131,7 @@ export default function BillingClient({ token }: Props) {
         // No Razorpay subscription ID yet (plan not configured in Razorpay) — open short URL.
         window.open(result.short_url, "_blank", "noopener,noreferrer");
       } else {
-        // Local/dev mode — subscription created without Razorpay keys.
+        // Fallback: subscription created without Razorpay keys (local/dev or free plan).
         toast.success(`Switched to ${plan.name} plan.`, {
           description: "No payment required in this environment.",
         });
@@ -315,7 +330,7 @@ export default function BillingClient({ token }: Props) {
   );
 }
 
-// Sub-components
+// ── Sub-components ───────────────────────────────────────────────────
 
 function PlanCard({
   plan,
