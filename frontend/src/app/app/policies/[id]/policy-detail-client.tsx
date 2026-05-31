@@ -9,6 +9,7 @@ import {
   uploadFileToStorage,
   recordDocument,
   deleteDocument,
+  ingestDocument,
   type PolicyRead,
   type DocumentRead,
 } from "@/lib/api";
@@ -37,6 +38,7 @@ import {
   Download,
   Trash2,
   Paperclip,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -182,7 +184,7 @@ export default function PolicyDetailClient({ id, token }: Props) {
   );
 }
 
-// ── Documents card ─────────────────────────────────────────────────────────────
+// ── Documents card ────────────────────────────────────────────────────────
 
 function DocumentsCard({
   policyId,
@@ -195,6 +197,7 @@ function DocumentsCard({
   const [docsLoading, setDocsLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [indexingId, setIndexingId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function loadDocs() {
@@ -281,6 +284,26 @@ function DocumentsCard({
     }
   }
 
+  async function handleIndex(doc: DocumentRead) {
+    setIndexingId(doc.id);
+    try {
+      const res = await ingestDocument(token, policyId, doc.id);
+      if (res.chunks === 0) {
+        toast.info("No extractable text found.", {
+          description: `"${doc.file_name}" may not be a text-based PDF.`,
+        });
+      } else {
+        toast.success(`Indexed ${res.chunks} chunks for AI search.`, {
+          description: `"${doc.file_name}" is now searchable via Ask sVault.`,
+        });
+      }
+    } catch {
+      // apiFetch already showed a toast (including 402 entitlement_required).
+    } finally {
+      setIndexingId(null);
+    }
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
@@ -359,6 +382,21 @@ function DocumentsCard({
                   <Button
                     size="sm"
                     variant="ghost"
+                    aria-label={`Index ${doc.file_name} for AI search`}
+                    title="Index for AI"
+                    disabled={indexingId === doc.id}
+                    onClick={() => handleIndex(doc)}
+                    className="text-zinc-500 hover:text-brand-600 hover:bg-brand-600/10 dark:hover:bg-brand-600/10"
+                  >
+                    {indexingId === doc.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     asChild
                     aria-label={`Download ${doc.file_name}`}
                   >
@@ -394,7 +432,7 @@ function DocumentsCard({
   );
 }
 
-// ── Skeleton / Error helpers ───────────────────────────────────────────────────
+// ── Skeleton / Error helpers ───────────────────────────────────────────
 
 function DetailSkeleton() {
   return (

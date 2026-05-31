@@ -21,6 +21,8 @@ import {
   CreditCard,
   Settings,
   Shield,
+  Sparkles,
+  CheckSquare,
   Menu,
   X,
   LogOut,
@@ -37,6 +39,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard },
   { label: "Policies", href: "/app/policies", icon: FileText },
+  { label: "Ask sVault", href: "/app/ask", icon: Sparkles },
+  { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
   { label: "Alerts", href: "/app/alerts", icon: Bell },
   { label: "Billing", href: "/app/billing", icon: CreditCard },
   { label: "Settings", href: "/app/settings", icon: Settings },
