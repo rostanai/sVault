@@ -1,4 +1,4 @@
-"""Policy document schemas (M2 — document vault)."""
+"""Policy document schemas (M2 — document vault + document library)."""
 from __future__ import annotations
 
 import uuid
@@ -42,3 +42,21 @@ class DocumentRead(BaseModel):
 
 class DocumentWithUrl(DocumentRead):
     download_url: str
+
+
+class DocumentLibraryItem(BaseModel):
+    """Cross-policy document library item with policy context and optional search snippet."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    file_name: str
+    doc_type: str
+    mime_type: str | None
+    size_bytes: int | None
+    created_at: datetime
+    download_url: str
+    policy_id: uuid.UUID
+    policy_title: str
+    policy_category: str
+    snippet: str | None = None
