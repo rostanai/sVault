@@ -8,7 +8,7 @@ import { toast } from "sonner";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "https://svault.rstglobal.in/api/v1";
 
-// ── Error type ────────────────────────────────────────────────────────────────
+// ── Error type ──────────────────────────────────────────────────────────
 
 export class AppError extends Error {
   code: string;
@@ -28,7 +28,7 @@ export class AppError extends Error {
   }
 }
 
-// ── Fetch core ────────────────────────────────────────────────────────────────
+// ── Fetch core ──────────────────────────────────────────────────────────
 
 async function apiFetch<T>(
   path: string,
@@ -84,7 +84,7 @@ export function withToken(token: string) {
   };
 }
 
-// ── Types (derived from backend Pydantic schemas) ──────────────────────────────
+// ── Types (derived from backend Pydantic schemas) ────────────────────────────
 
 export interface Health {
   status: string;
@@ -322,7 +322,7 @@ export const getSubscription = (token: string) =>
 export const getInvoices = (token: string) =>
   apiFetch<InvoiceRead[]>("/billing/invoices", { token, silent: true });
 
-// ── Billing: subscribe ────────────────────────────────────────────────────────
+// ── Billing: subscribe ─────────────────────────────────────────────────
 
 export interface SubscribeResponse {
   subscription_id: string;
@@ -339,7 +339,7 @@ export const subscribe = (token: string, planId: string) =>
     token,
   });
 
-// ── Documents ─────────────────────────────────────────────────────────────────
+// ── Documents ─────────────────────────────────────────────────────────
 
 export type DocType =
   | "policy"
@@ -422,7 +422,7 @@ export const deleteDocument = (token: string, documentId: string) =>
     silent: true,
   });
 
-// ── Users / Invitations ───────────────────────────────────────────────────────
+// ── Users / Invitations ──────────────────────────────────────────────
 
 export interface ProfileRead {
   id: string;
@@ -467,5 +467,116 @@ export const createInvitation = (
   apiFetch<InvitationRead>("/invitations", {
     method: "POST",
     body: JSON.stringify(body),
+    token,
+  });
+
+// ── Ask sVault (AI / RAG) ─────────────────────────────────────────────
+
+export interface AskSource {
+  policy_id: string;
+  snippet: string;
+}
+
+export interface AskResponse {
+  answer: string;
+  sources: AskSource[];
+}
+
+export interface IngestResponse {
+  chunks: number;
+}
+
+/** Ask a natural-language question grounded in the tenant's policy documents. */
+export const askSvault = (token: string, question: string) =>
+  apiFetch<AskResponse>("/ask", {
+    method: "POST",
+    body: JSON.stringify({ question }),
+    token,
+  });
+
+/** Index a policy document for AI retrieval (idempotent). Returns chunk count. */
+export const ingestDocument = (
+  token: string,
+  policyId: string,
+  documentId: string
+) =>
+  apiFetch<IngestResponse>(
+    `/policies/${policyId}/documents/${documentId}/ingest`,
+    { method: "POST", token }
+  );
+
+// ── Approvals ─────────────────────────────────────────────────────────
+
+export type ApprovalActionType =
+  | "renewal"
+  | "new_policy"
+  | "vendor_finalization"
+  | "high_value_premium"
+  | "other";
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface ApprovalRead {
+  id: string;
+  tenant_id: string;
+  org_id: string | null;
+  action_type: string;
+  entity_type: string;
+  entity_id: string;
+  amount_inr: string | null;
+  status: string;
+  requested_by: string | null;
+  approver_id: string | null;
+  is_self_approval: boolean;
+  reason: string | null;
+  decided_at: string | null;
+  created_at: string;
+}
+
+export interface ApprovalCreate {
+  action_type: ApprovalActionType;
+  entity_type: string;
+  entity_id: string;
+  amount_inr?: string;
+}
+
+export const getApprovals = (
+  token: string,
+  params?: { status?: ApprovalStatus; limit?: number; offset?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<ApprovalRead[]>(`/approvals${query}`, { token });
+};
+
+export const createApproval = (token: string, body: ApprovalCreate) =>
+  apiFetch<ApprovalRead>("/approvals", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const approveApproval = (
+  token: string,
+  approvalId: string,
+  reason?: string
+) =>
+  apiFetch<ApprovalRead>(`/approvals/${approvalId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason ?? null }),
+    token,
+  });
+
+export const rejectApproval = (
+  token: string,
+  approvalId: string,
+  reason?: string
+) =>
+  apiFetch<ApprovalRead>(`/approvals/${approvalId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason ?? null }),
     token,
   });
