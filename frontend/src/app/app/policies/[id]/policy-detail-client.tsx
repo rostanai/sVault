@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   getPolicy,
   listDocuments,
@@ -13,10 +14,12 @@ import {
   getAlertRule,
   setAlertRule,
   markPolicyRenewed,
+  renewPolicy,
   type PolicyRead,
   type DocumentRead,
   type AlertChannel,
   type AlertRuleRead,
+  type RenewPolicyRequest,
 } from "@/lib/api";
 import {
   formatDate,
@@ -45,6 +48,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -61,6 +65,7 @@ import {
   Mail,
   Phone,
   Send,
+  RotateCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -85,12 +90,37 @@ interface Props {
   token: string;
 }
 
+/** Adds one year to an ISO date string, returning an ISO date string.
+ *  Returns an empty string if the input is null/undefined/unparseable. */
+function addOneYear(isoDate: string | null | undefined): string {
+  if (!isoDate) return "";
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return "";
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function PolicyDetailClient({ id, token }: Props) {
+  const router = useRouter();
   const [policy, setPolicy] = useState<PolicyRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [renewConfirmOpen, setRenewConfirmOpen] = useState(false);
   const [markingRenewed, setMarkingRenewed] = useState(false);
+
+  // Renew-policy dialog state
+  const [renewDialogOpen, setRenewDialogOpen] = useState(false);
+  const [renewSubmitting, setRenewSubmitting] = useState(false);
+  const [renewForm, setRenewForm] = useState<RenewPolicyRequest>({
+    expiry_date: "",
+    inception_date: "",
+    renewal_date: "",
+    premium_inr: "",
+    gst_inr: "",
+    sum_insured_inr: "",
+    policy_number: "",
+  });
+  const [renewExpiryError, setRenewExpiryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -115,6 +145,50 @@ export default function PolicyDetailClient({ id, token }: Props) {
       // apiFetch already toasted
     } finally {
       setMarkingRenewed(false);
+    }
+  }
+
+  function openRenewDialog() {
+    if (!policy) return;
+    setRenewForm({
+      expiry_date: addOneYear(policy.expiry_date),
+      inception_date: policy.expiry_date ?? "",
+      renewal_date: "",
+      premium_inr: policy.premium_inr ?? "",
+      gst_inr: policy.gst_inr ?? "",
+      sum_insured_inr: policy.sum_insured_inr ?? "",
+      policy_number: policy.policy_number ?? "",
+    });
+    setRenewExpiryError(null);
+    setRenewDialogOpen(true);
+  }
+
+  async function handleRenewPolicy(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!renewForm.expiry_date) {
+      setRenewExpiryError("Expiry date is required.");
+      return;
+    }
+    setRenewExpiryError(null);
+    setRenewSubmitting(true);
+    try {
+      const body: RenewPolicyRequest = {
+        expiry_date: renewForm.expiry_date,
+        ...(renewForm.inception_date ? { inception_date: renewForm.inception_date } : {}),
+        ...(renewForm.renewal_date ? { renewal_date: renewForm.renewal_date } : {}),
+        ...(renewForm.premium_inr ? { premium_inr: renewForm.premium_inr } : {}),
+        ...(renewForm.gst_inr ? { gst_inr: renewForm.gst_inr } : {}),
+        ...(renewForm.sum_insured_inr ? { sum_insured_inr: renewForm.sum_insured_inr } : {}),
+        ...(renewForm.policy_number ? { policy_number: renewForm.policy_number } : {}),
+      };
+      const newPolicy = await renewPolicy(token, id, body);
+      toast.success("Policy renewed — new term created.");
+      setRenewDialogOpen(false);
+      router.push(`/app/policies/${newPolicy.id}`);
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setRenewSubmitting(false);
     }
   }
 
@@ -177,23 +251,36 @@ export default function PolicyDetailClient({ id, token }: Props) {
               {statusLabel(policy.status)}
             </Badge>
             {policy.status !== "renewed" && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setRenewConfirmOpen(true)}
-                disabled={markingRenewed}
-                aria-label="Mark this policy as renewed"
-                className="h-7 px-2.5 text-xs text-brand-600 border-brand-600/40 hover:bg-brand-600/10 dark:text-brand-400 dark:border-brand-600/40 dark:hover:bg-brand-600/10"
-              >
-                {markingRenewed ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <>
-                    <CheckCircle className="mr-1 h-3.5 w-3.5" />
-                    Mark renewed
-                  </>
-                )}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={openRenewDialog}
+                  disabled={renewSubmitting}
+                  aria-label="Renew this policy — create a new term"
+                  className="h-7 px-2.5 text-xs text-brand-600 border-brand-600/40 hover:bg-brand-600/10 dark:text-brand-400 dark:border-brand-600/40 dark:hover:bg-brand-600/10"
+                >
+                  <RotateCw className="mr-1 h-3.5 w-3.5" />
+                  Renew
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setRenewConfirmOpen(true)}
+                  disabled={markingRenewed}
+                  aria-label="Mark this policy as renewed"
+                  className="h-7 px-2.5 text-xs text-brand-600 border-brand-600/40 hover:bg-brand-600/10 dark:text-brand-400 dark:border-brand-600/40 dark:hover:bg-brand-600/10"
+                >
+                  {markingRenewed ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                      Mark renewed
+                    </>
+                  )}
+                </Button>
+              </>
             )}
           </div>
           {daysLeft != null && (
@@ -240,6 +327,190 @@ export default function PolicyDetailClient({ id, token }: Props) {
                 <>
                   <CheckCircle className="mr-1.5 h-4 w-4" />
                   Confirm
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renew Policy dialog */}
+      <Dialog open={renewDialogOpen} onOpenChange={setRenewDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCw className="h-4 w-4 text-brand-600" />
+              Renew policy
+            </DialogTitle>
+            <DialogDescription>
+              Enter the details for the new policy term. A linked renewal record will be created and you&apos;ll be taken to it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            id="renew-policy-form"
+            onSubmit={handleRenewPolicy}
+            noValidate
+            className="space-y-4 pt-1"
+          >
+            {/* Row: inception + expiry */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="renew-inception-date" className="text-xs font-medium">
+                  Inception date
+                </Label>
+                <Input
+                  id="renew-inception-date"
+                  type="date"
+                  value={renewForm.inception_date ?? ""}
+                  onChange={(e) =>
+                    setRenewForm((f) => ({ ...f, inception_date: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="renew-expiry-date" className="text-xs font-medium">
+                  Expiry date <span className="text-red-500" aria-hidden="true">*</span>
+                </Label>
+                <Input
+                  id="renew-expiry-date"
+                  type="date"
+                  required
+                  value={renewForm.expiry_date}
+                  onChange={(e) => {
+                    setRenewExpiryError(null);
+                    setRenewForm((f) => ({ ...f, expiry_date: e.target.value }));
+                  }}
+                  aria-describedby={renewExpiryError ? "renew-expiry-error" : undefined}
+                  aria-invalid={!!renewExpiryError}
+                  className={cn(
+                    "h-8 text-sm",
+                    renewExpiryError && "border-red-500 focus-visible:ring-red-500"
+                  )}
+                />
+                {renewExpiryError && (
+                  <p id="renew-expiry-error" role="alert" className="text-xs text-red-500">
+                    {renewExpiryError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Renewal date */}
+            <div className="space-y-1.5">
+              <Label htmlFor="renew-renewal-date" className="text-xs font-medium">
+                Renewal date <span className="text-zinc-400 font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="renew-renewal-date"
+                type="date"
+                value={renewForm.renewal_date ?? ""}
+                onChange={(e) =>
+                  setRenewForm((f) => ({ ...f, renewal_date: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+
+            {/* Row: premium + GST */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="renew-premium" className="text-xs font-medium">
+                  Annual premium (INR)
+                </Label>
+                <Input
+                  id="renew-premium"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="e.g. 125000"
+                  value={renewForm.premium_inr ?? ""}
+                  onChange={(e) =>
+                    setRenewForm((f) => ({ ...f, premium_inr: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="renew-gst" className="text-xs font-medium">
+                  GST (INR)
+                </Label>
+                <Input
+                  id="renew-gst"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="e.g. 22500"
+                  value={renewForm.gst_inr ?? ""}
+                  onChange={(e) =>
+                    setRenewForm((f) => ({ ...f, gst_inr: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Sum insured */}
+            <div className="space-y-1.5">
+              <Label htmlFor="renew-sum-insured" className="text-xs font-medium">
+                Sum insured (INR)
+              </Label>
+              <Input
+                id="renew-sum-insured"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 5000000"
+                value={renewForm.sum_insured_inr ?? ""}
+                onChange={(e) =>
+                  setRenewForm((f) => ({ ...f, sum_insured_inr: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+
+            {/* Policy number */}
+            <div className="space-y-1.5">
+              <Label htmlFor="renew-policy-number" className="text-xs font-medium">
+                Policy number
+              </Label>
+              <Input
+                id="renew-policy-number"
+                type="text"
+                placeholder="e.g. POL-2026-001"
+                value={renewForm.policy_number ?? ""}
+                onChange={(e) =>
+                  setRenewForm((f) => ({ ...f, policy_number: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+          </form>
+
+          <DialogFooter className="flex gap-2 sm:justify-end pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRenewDialogOpen(false)}
+              disabled={renewSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="renew-policy-form"
+              size="sm"
+              disabled={renewSubmitting}
+              className="bg-brand-600 hover:bg-brand-600/90 text-white"
+            >
+              {renewSubmitting ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                <>
+                  <RotateCw className="mr-1.5 h-4 w-4" />
+                  Renew policy
                 </>
               )}
             </Button>
