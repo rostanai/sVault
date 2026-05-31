@@ -15,11 +15,13 @@ import {
   setAlertRule,
   markPolicyRenewed,
   renewPolicy,
+  updatePolicy,
   getInstallments,
   addInstallment,
   markInstallmentPaid,
   deleteInstallment,
   type PolicyRead,
+  type PolicyUpdate,
   type DocumentRead,
   type AlertChannel,
   type AlertRuleRead,
@@ -56,6 +58,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowLeft,
   AlertTriangle,
   CheckCircle,
@@ -75,10 +84,23 @@ import {
   Plus,
   IndianRupee,
   Wallet,
+  Pencil,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
+
+// Status options for the Edit dialog
+const POLICY_STATUSES: { value: string; label: string }[] = [
+  { value: "draft", label: "Draft" },
+  { value: "pending_approval", label: "Pending Approval" },
+  { value: "active", label: "Active" },
+  { value: "expiring", label: "Expiring" },
+  { value: "lapsed", label: "Lapsed" },
+  { value: "renewed", label: "Renewed" },
+  { value: "cancelled", label: "Cancelled" },
+];
 const ALLOWED_TYPES = [
   "application/pdf",
   "image/png",
@@ -130,6 +152,11 @@ export default function PolicyDetailClient({ id, token }: Props) {
     policy_number: "",
   });
   const [renewExpiryError, setRenewExpiryError] = useState<string | null>(null);
+
+  // Edit-policy dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editForm, setEditForm] = useState<PolicyUpdate>({});
 
   useEffect(() => {
     if (!token) {
@@ -201,6 +228,50 @@ export default function PolicyDetailClient({ id, token }: Props) {
     }
   }
 
+  function openEditDialog() {
+    if (!policy) return;
+    setEditForm({
+      title: policy.title,
+      policy_number: policy.policy_number ?? "",
+      sum_insured_inr: policy.sum_insured_inr ?? "",
+      premium_inr: policy.premium_inr ?? "",
+      gst_inr: policy.gst_inr ?? "",
+      inception_date: policy.inception_date ?? "",
+      expiry_date: policy.expiry_date ?? "",
+      renewal_date: policy.renewal_date ?? "",
+      status: policy.status,
+    });
+    setEditDialogOpen(true);
+  }
+
+  async function handleEditSave(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!policy) return;
+    setEditSubmitting(true);
+    try {
+      // Build a body with only the standard (non-custom_fields) fields
+      const body: PolicyUpdate = {
+        ...(editForm.title !== undefined ? { title: editForm.title } : {}),
+        ...(editForm.policy_number !== undefined ? { policy_number: editForm.policy_number || null } : {}),
+        ...(editForm.sum_insured_inr !== undefined ? { sum_insured_inr: editForm.sum_insured_inr || null } : {}),
+        ...(editForm.premium_inr !== undefined ? { premium_inr: editForm.premium_inr || null } : {}),
+        ...(editForm.gst_inr !== undefined ? { gst_inr: editForm.gst_inr || null } : {}),
+        ...(editForm.inception_date !== undefined ? { inception_date: editForm.inception_date || null } : {}),
+        ...(editForm.expiry_date !== undefined ? { expiry_date: editForm.expiry_date || null } : {}),
+        ...(editForm.renewal_date !== undefined ? { renewal_date: editForm.renewal_date || null } : {}),
+        ...(editForm.status !== undefined ? { status: editForm.status } : {}),
+      };
+      const updated = await updatePolicy(token, id, body);
+      setPolicy(updated);
+      setEditDialogOpen(false);
+      toast.success("Policy updated.");
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setEditSubmitting(false);
+    }
+  }
+
   if (loading) return <DetailSkeleton />;
   if (error) return <ErrorState message={error} />;
   if (!policy) return null;
@@ -259,6 +330,16 @@ export default function PolicyDetailClient({ id, token }: Props) {
             >
               {statusLabel(policy.status)}
             </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openEditDialog}
+              aria-label="Edit policy details"
+              className="h-7 px-2.5 text-xs"
+            >
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              Edit
+            </Button>
             {policy.status !== "renewed" && (
               <>
                 <Button
@@ -336,6 +417,221 @@ export default function PolicyDetailClient({ id, token }: Props) {
                 <>
                   <CheckCircle className="mr-1.5 h-4 w-4" />
                   Confirm
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit policy dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-brand-600" />
+              Edit policy
+            </DialogTitle>
+            <DialogDescription>
+              Update the core details for this policy. Custom fields are managed separately below.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            id="edit-policy-form"
+            onSubmit={handleEditSave}
+            noValidate
+            className="space-y-4 pt-1"
+          >
+            {/* Title */}
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-title" className="text-xs font-medium">
+                Title <span className="text-red-500" aria-hidden="true">*</span>
+              </Label>
+              <Input
+                id="edit-title"
+                type="text"
+                required
+                placeholder="e.g. Factory Fire Insurance"
+                value={editForm.title ?? ""}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, title: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+
+            {/* Policy number + status */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-policy-number" className="text-xs font-medium">
+                  Policy number
+                </Label>
+                <Input
+                  id="edit-policy-number"
+                  type="text"
+                  placeholder="e.g. POL-2026-001"
+                  value={editForm.policy_number ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, policy_number: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-status" className="text-xs font-medium">
+                  Status
+                </Label>
+                <Select
+                  value={editForm.status ?? ""}
+                  onValueChange={(val) =>
+                    setEditForm((f) => ({ ...f, status: val }))
+                  }
+                >
+                  <SelectTrigger id="edit-status" className="h-8 text-sm">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {POLICY_STATUSES.map(({ value, label }) => (
+                      <SelectItem key={value} value={value} className="text-sm">
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Sum insured */}
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-sum-insured" className="text-xs font-medium">
+                Sum insured (INR)
+              </Label>
+              <Input
+                id="edit-sum-insured"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 5000000"
+                value={editForm.sum_insured_inr ?? ""}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, sum_insured_inr: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+
+            {/* Premium + GST */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-premium" className="text-xs font-medium">
+                  Annual premium (INR)
+                </Label>
+                <Input
+                  id="edit-premium"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="e.g. 125000"
+                  value={editForm.premium_inr ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, premium_inr: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-gst" className="text-xs font-medium">
+                  GST (INR)
+                </Label>
+                <Input
+                  id="edit-gst"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="e.g. 22500"
+                  value={editForm.gst_inr ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, gst_inr: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Inception + expiry */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-inception-date" className="text-xs font-medium">
+                  Inception date
+                </Label>
+                <Input
+                  id="edit-inception-date"
+                  type="date"
+                  value={editForm.inception_date ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, inception_date: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-expiry-date" className="text-xs font-medium">
+                  Expiry date
+                </Label>
+                <Input
+                  id="edit-expiry-date"
+                  type="date"
+                  value={editForm.expiry_date ?? ""}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, expiry_date: e.target.value }))
+                  }
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Renewal date */}
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-renewal-date" className="text-xs font-medium">
+                Renewal date{" "}
+                <span className="text-zinc-400 font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="edit-renewal-date"
+                type="date"
+                value={editForm.renewal_date ?? ""}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, renewal_date: e.target.value }))
+                }
+                className="h-8 text-sm"
+              />
+            </div>
+          </form>
+
+          <DialogFooter className="flex gap-2 sm:justify-end pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setEditDialogOpen(false)}
+              disabled={editSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="edit-policy-form"
+              size="sm"
+              disabled={editSubmitting}
+              className="bg-brand-600 hover:bg-brand-600/90 text-white"
+            >
+              {editSubmitting ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <Pencil className="mr-1.5 h-4 w-4" />
+                  Save changes
                 </>
               )}
             </Button>
@@ -546,6 +842,9 @@ export default function PolicyDetailClient({ id, token }: Props) {
         </CardContent>
       </Card>
 
+      {/* Custom Fields */}
+      <CustomFieldsCard policy={policy} token={token} onUpdate={setPolicy} />
+
       {/* Documents */}
       <DocumentsCard policyId={id} token={token} />
 
@@ -555,6 +854,191 @@ export default function PolicyDetailClient({ id, token }: Props) {
       {/* Alert Schedule */}
       <AlertRuleCard policyId={id} token={token} />
     </div>
+  );
+}
+
+// ── Custom Fields card ────────────────────────────────────────────────────────
+
+interface CustomFieldRow {
+  key: string;
+  value: string;
+}
+
+function CustomFieldsCard({
+  policy,
+  token,
+  onUpdate,
+}: {
+  policy: PolicyRead;
+  token: string;
+  onUpdate: (updated: PolicyRead) => void;
+}) {
+  const [rows, setRows] = useState<CustomFieldRow[]>(() =>
+    Object.entries(policy.custom_fields ?? {}).map(([key, value]) => ({ key, value }))
+  );
+  const [saving, setSaving] = useState(false);
+
+  // Re-seed when the policy prop changes (e.g. after edit-policy save)
+  useEffect(() => {
+    setRows(
+      Object.entries(policy.custom_fields ?? {}).map(([key, value]) => ({ key, value }))
+    );
+  }, [policy]);
+
+  function handleRowChange(
+    index: number,
+    field: "key" | "value",
+    newVal: string
+  ) {
+    setRows((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: newVal } : row))
+    );
+  }
+
+  function handleAddRow() {
+    setRows((prev) => [...prev, { key: "", value: "" }]);
+  }
+
+  function handleRemoveRow(index: number) {
+    setRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function handleSave() {
+    // Build record: skip empty keys, last-wins on duplicates
+    const custom_fields: Record<string, string> = {};
+    for (const row of rows) {
+      const trimmedKey = row.key.trim();
+      if (trimmedKey) {
+        custom_fields[trimmedKey] = row.value;
+      }
+    }
+    setSaving(true);
+    try {
+      const updated = await updatePolicy(token, policy.id, { custom_fields });
+      onUpdate(updated);
+      toast.success("Custom fields saved.");
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
+        <div>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <SlidersHorizontal className="h-4 w-4 text-brand-600" />
+            Custom Fields
+          </CardTitle>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            Store category-specific details — e.g. Engine No, Chassis No for vehicles; Boiler capacity for machinery.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleAddRow}
+          aria-label="Add custom field"
+        >
+          <Plus className="mr-1.5 h-4 w-4" />
+          Add field
+        </Button>
+      </CardHeader>
+
+      <CardContent>
+        {rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <SlidersHorizontal className="mb-2 h-7 w-7 text-zinc-300" />
+            <p className="text-sm text-zinc-500">No custom fields yet — add category-specific details here.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div
+              role="list"
+              aria-label="Custom field rows"
+              className="space-y-2"
+            >
+              {rows.map((row, index) => (
+                <div
+                  key={index}
+                  role="listitem"
+                  className="flex items-center gap-2"
+                >
+                  <div className="flex-1 min-w-0">
+                    <Label
+                      htmlFor={`cf-key-${index}`}
+                      className="sr-only"
+                    >
+                      Field name for row {index + 1}
+                    </Label>
+                    <Input
+                      id={`cf-key-${index}`}
+                      type="text"
+                      placeholder="Field name"
+                      value={row.key}
+                      onChange={(e) =>
+                        handleRowChange(index, "key", e.target.value)
+                      }
+                      className="h-8 text-sm"
+                      aria-label={`Custom field name, row ${index + 1}`}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <Label
+                      htmlFor={`cf-value-${index}`}
+                      className="sr-only"
+                    >
+                      Field value for row {index + 1}
+                    </Label>
+                    <Input
+                      id={`cf-value-${index}`}
+                      type="text"
+                      placeholder="Value"
+                      value={row.value}
+                      onChange={(e) =>
+                        handleRowChange(index, "value", e.target.value)
+                      }
+                      className="h-8 text-sm"
+                      aria-label={`Custom field value, row ${index + 1}`}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleRemoveRow(index)}
+                    aria-label={`Remove custom field row ${index + 1}${row.key ? ` (${row.key})` : ""}`}
+                    className="h-7 w-7 p-0 shrink-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-1">
+              <Button
+                size="sm"
+                disabled={saving}
+                onClick={handleSave}
+                className="bg-brand-600 hover:bg-brand-600/90 text-white"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  "Save custom fields"
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
