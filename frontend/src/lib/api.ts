@@ -673,7 +673,7 @@ export const setAlertRule = (
     token,
   });
 
-// ── AI Policy Intake (auto-extract from a document) ────────────────────────────
+// ── AI Policy Intake (auto-extract from a document) ──────────────────────────
 
 export interface PolicyExtraction {
   category: PolicyCategory | null;
@@ -863,7 +863,7 @@ export const adminSetSetting = (
 export const adminGetAnalytics = (token: string) =>
   apiFetch<PlatformAnalytics>("/platform/analytics", { token });
 
-// ── Reports + Excel import/export ──────────────────────────────────────
+// ── Reports + Excel import/export ───────────────────────────────────────────────
 
 export interface RenewalReportRow {
   policy_id: string;
