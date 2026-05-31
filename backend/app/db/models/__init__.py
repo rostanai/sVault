@@ -19,6 +19,7 @@ from app.db.models.billing import (  # noqa: F401
     PlatformSetting,
     Subscription,
 )
+from app.db.models.claims import Claim, ClaimEvent  # noqa: F401
 from app.db.models.installments import Installment  # noqa: F401
 from app.db.models.insurance import (  # noqa: F401
     Policy,
@@ -44,4 +45,5 @@ __all__ = [
     "Webhook",
     "Installment",
     "ProviderContact",
+    "Claim", "ClaimEvent",
 ]
