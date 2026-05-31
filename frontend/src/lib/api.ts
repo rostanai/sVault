@@ -1169,3 +1169,131 @@ export const getNotificationHistory = (
 /** Download an iCalendar (.ics) file of all policy expiry/renewal dates. */
 export const downloadCalendar = (token: string) =>
   downloadAuthed(token, "/calendar.ics", "svault-renewals.ics");
+
+// ── Provider detail + contact log ───────────────────────────────────────────────
+
+export interface ProviderUpdate {
+  name?: string;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  notes?: string | null;
+}
+
+export interface ProviderContact {
+  id: string;
+  provider_id: string;
+  kind: string; // call | email | meeting | note
+  subject: string | null;
+  note: string | null;
+  contacted_at: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ProviderContactCreate {
+  kind: string;
+  subject?: string;
+  note?: string;
+  contacted_at?: string;
+}
+
+export const getProvider = (token: string, providerId: string) =>
+  apiFetch<ProviderRead>(`/providers/${providerId}`, { token });
+
+export const updateProvider = (
+  token: string,
+  providerId: string,
+  body: ProviderUpdate
+) =>
+  apiFetch<ProviderRead>(`/providers/${providerId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const getProviderContacts = (token: string, providerId: string) =>
+  apiFetch<ProviderContact[]>(`/providers/${providerId}/contacts`, { token });
+
+export const addProviderContact = (
+  token: string,
+  providerId: string,
+  body: ProviderContactCreate
+) =>
+  apiFetch<ProviderContact>(`/providers/${providerId}/contacts`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const deleteProviderContact = (token: string, contactId: string) =>
+  apiFetch<void>(`/provider-contacts/${contactId}`, {
+    method: "DELETE",
+    token,
+    silent: true,
+  });
+
+// ── Policy installments / payment tracking ──────────────────────────────────────
+
+export interface Installment {
+  id: string;
+  policy_id: string;
+  amount_inr: string;
+  due_date: string;
+  status: string; // pending | paid
+  paid_at: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface InstallmentCreate {
+  amount_inr: string;
+  due_date: string;
+  note?: string;
+}
+
+export const getInstallments = (token: string, policyId: string) =>
+  apiFetch<Installment[]>(`/policies/${policyId}/installments`, { token });
+
+export const addInstallment = (
+  token: string,
+  policyId: string,
+  body: InstallmentCreate
+) =>
+  apiFetch<Installment>(`/policies/${policyId}/installments`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+
+export const markInstallmentPaid = (token: string, installmentId: string) =>
+  apiFetch<Installment>(`/installments/${installmentId}/pay`, {
+    method: "POST",
+    token,
+  });
+
+export const deleteInstallment = (token: string, installmentId: string) =>
+  apiFetch<void>(`/installments/${installmentId}`, {
+    method: "DELETE",
+    token,
+    silent: true,
+  });
+
+// ── Consolidated group dashboard (parent rolls up subsidiaries) ─────────────────
+
+export interface OrgRollup {
+  org_id: string;
+  org_name: string;
+  policies: number;
+  sum_insured_inr: string;
+  premium_inr: string;
+  expiring_30: number;
+}
+
+export interface GroupDashboardResponse {
+  totals: DashboardTotals;
+  by_org: OrgRollup[];
+}
+
+export const getGroupDashboard = (token: string) =>
+  apiFetch<GroupDashboardResponse>("/dashboard/group", { token });

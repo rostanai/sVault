@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   getDashboard,
+  getGroupDashboard,
   getOnboardingStatus,
   type DashboardResponse,
+  type GroupDashboardResponse,
   type OnboardingStatus,
 } from "@/lib/api";
+import { GroupRollup } from "./group-rollup";
 import { OnboardingChecklist } from "./onboarding-checklist";
 import { formatINR, formatDate, daysLeftVariant, categorylabel, statusLabel } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +47,8 @@ export default function DashboardClient({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  // undefined = loading; null = failed/hidden; data = loaded
+  const [group, setGroup] = useState<GroupDashboardResponse | null | undefined>(undefined);
 
   useEffect(() => {
     if (!token) {
@@ -57,6 +62,11 @@ export default function DashboardClient({ token }: Props) {
       .catch(() => {
         /* hide on error */
       });
+
+    // Best-effort group rollup — failure hides the section (null = hidden)
+    getGroupDashboard(token)
+      .then(setGroup)
+      .catch(() => setGroup(null));
 
     getDashboard(token)
       .then(setData)
@@ -126,6 +136,9 @@ export default function DashboardClient({ token }: Props) {
         <StatusDonutChart statusCounts={status_counts} />
         <ExpiryTimelineChart expiring={expiring} />
       </div>
+
+      {/* Group breakdown — visible only for multi-org tenants */}
+      <GroupRollup group={group} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* By category (text list kept for accessibility / quick scan) */}

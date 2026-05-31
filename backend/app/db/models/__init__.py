@@ -19,11 +19,13 @@ from app.db.models.billing import (  # noqa: F401
     PlatformSetting,
     Subscription,
 )
+from app.db.models.installments import Installment  # noqa: F401
 from app.db.models.insurance import (  # noqa: F401
     Policy,
     PolicyDocument,
     Provider,
 )
+from app.db.models.provider_contacts import ProviderContact  # noqa: F401
 from app.db.models.tenancy import (  # noqa: F401
     Invitation,
     Organization,
@@ -40,4 +42,6 @@ __all__ = [
     "Approval",
     "ApiKey",
     "Webhook",
+    "Installment",
+    "ProviderContact",
 ]

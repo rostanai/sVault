@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   getProviders,
   createProvider,
@@ -267,14 +268,22 @@ function ProviderCard({ provider }: { provider: ProviderRead }) {
     provider.contact_name || provider.contact_email || provider.contact_phone;
 
   return (
-    <Card className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 shadow-none">
+    <Card className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 shadow-none transition-shadow hover:shadow-sm">
       <CardContent className="p-4 space-y-3">
-        <div className="flex items-start gap-2">
+        {/* Name row — entire row links to the detail page */}
+        <Link
+          href={`/app/providers/${provider.id}`}
+          className={cn(
+            "flex items-start gap-2 group",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 rounded"
+          )}
+          aria-label={`View details for ${provider.name}`}
+        >
           <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
-          <span className="font-semibold text-sm leading-snug">
+          <span className="font-semibold text-sm leading-snug group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
             {provider.name}
           </span>
-        </div>
+        </Link>
 
         {hasAnyContact ? (
           <div className="space-y-1.5 pt-0.5">
@@ -287,6 +296,7 @@ function ProviderCard({ provider }: { provider: ProviderRead }) {
             {provider.contact_email && (
               <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
                 <Mail className="h-3.5 w-3.5 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                {/* stopPropagation not needed here since the mailto is not inside a parent Link */}
                 <a
                   href={`mailto:${provider.contact_email}`}
                   className="truncate hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
