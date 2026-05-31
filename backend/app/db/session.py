@@ -21,8 +21,13 @@ if settings.database_url:
     _engine = create_async_engine(
         settings.database_url,
         poolclass=NullPool,  # pooling handled by Supavisor, not SQLAlchemy
-        pool_pre_ping=True,
-        connect_args={"statement_cache_size": 0},  # required behind pgbouncer
+        # NOTE: no pool_pre_ping — NullPool hands out a fresh connection every
+        # request, so a pre-ping SELECT 1 only adds a round-trip with no benefit.
+        connect_args={
+            "statement_cache_size": 0,  # required behind pgbouncer (transaction pooling)
+            "timeout": 10,  # fail fast if the pooler host is unreachable (no 45s hang)
+            "command_timeout": 30,  # cap any single statement
+        },
     )
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
 
