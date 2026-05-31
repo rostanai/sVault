@@ -9,6 +9,7 @@ from app.db.models.alerts import (  # noqa: F401
     AlertRule,
     NotificationLog,
 )
+from app.db.models.approvals import Approval  # noqa: F401
 from app.db.models.billing import (  # noqa: F401
     BillingEvent,
     Invoice,
@@ -34,4 +35,5 @@ __all__ = [
     "Plan", "Subscription", "Invoice", "BillingEvent", "PlatformSetting", "PlatformAuditLog",
     "Provider", "Policy", "PolicyDocument",
     "AlertRule", "Alert", "NotificationLog",
+    "Approval",
 ]

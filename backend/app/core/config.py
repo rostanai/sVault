@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key())"
     secrets_encryption_key: str = ""
 
+    # "sVault AI" — LLM provider (OpenAI-compatible chat API). Branded as sVault AI
+    # in all user-facing text; the underlying provider name is never surfaced.
+    svault_ai_api_key: str = ""
+    svault_ai_base_url: str = "https://api.deepseek.com"
+    svault_ai_model: str = "deepseek-chat"
+
     @property
     def is_prod(self) -> bool:
         return self.env == "prod"

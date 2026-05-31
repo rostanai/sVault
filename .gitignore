@@ -33,3 +33,6 @@ supabase/.temp/
 *.log
 .idea/
 .vscode/
+
+# agent worktrees
+.claude/worktrees/
