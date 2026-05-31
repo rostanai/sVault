@@ -297,3 +297,165 @@ async def test_policy_titles_batch_resolved():
     # The DB should have been called exactly 3 times:
     # 1 → alerts, 2 → approvals, 3 → policy titles (single batch).
     assert db.execute.await_count == 3
+
+
+# ===========================================================================
+# History endpoint — GET /notifications/history
+# ===========================================================================
+
+def _make_history_db(alerts: list, approvals: list, policy_rows: list | None = None) -> AsyncMock:
+    """Fake DB for get_history: alerts (scalars) → approvals (scalars) → titles (rows)."""
+    def _scalars(items):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = items
+        return result
+
+    def _rows(items):
+        result = MagicMock()
+        result.all.return_value = items
+        return result
+
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalars(alerts),
+        _scalars(approvals),
+        _rows(policy_rows or []),
+    ])
+    return db
+
+
+# ---------------------------------------------------------------------------
+# H1. Auth guard for history endpoint
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_notification_history_requires_auth():
+    """GET /notifications/history without a bearer token must return 401."""
+    transport = httpx.ASGITransport(app=_test_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/notifications/history")
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "unauthorized"
+
+
+# ---------------------------------------------------------------------------
+# H2. History includes decided/acknowledged items
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_history_includes_acknowledged_alerts():
+    """History feed includes alerts with status=acknowledged (not just unacked)."""
+    policy_id = uuid.uuid4()
+
+    # Simulate an acknowledged alert (status would be 'acknowledged' on the ORM,
+    # but get_history does NOT filter by status — so we include it regardless).
+    acked_alert = _alert_orm(policy_id=policy_id, lead_day=30, channel="email")
+    acked_alert.status = "acknowledged"
+
+    approved_approval = _approval_orm(action_type="renewal", entity_type="policy")
+    approved_approval.status = "approved"
+
+    policy_row = _policy_row(policy_id, "Fleet Insurance")
+
+    db = _make_history_db([acked_alert], [approved_approval], [policy_row])
+    user = _user()
+
+    from app.services import notification_feed_service
+    history = await notification_feed_service.get_history(db, user, limit=50, offset=0)
+
+    assert history.total == 2
+    assert len(history.items) == 2
+    types = {item.type for item in history.items}
+    assert "alert" in types
+    assert "approval" in types
+
+
+# ---------------------------------------------------------------------------
+# H3. History returns items newest-first
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_history_newest_first():
+    """History items are sorted newest-first."""
+    from app.services import notification_feed_service
+
+    older = _NOW - timedelta(hours=5)
+    newer = _NOW - timedelta(hours=1)
+
+    alert = _alert_orm(lead_day=7, channel="sms", created_at=older)
+    approval = _approval_orm(created_at=newer)
+    policy_row = _policy_row(alert.policy_id, "Machinery Cover")
+
+    db = _make_history_db([alert], [approval], [policy_row])
+    user = _user()
+
+    history = await notification_feed_service.get_history(db, user, limit=50, offset=0)
+
+    assert history.items[0].type == "approval"  # newer
+    assert history.items[1].type == "alert"     # older
+
+
+# ---------------------------------------------------------------------------
+# H4. Pagination: limit and offset work correctly
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_history_pagination():
+    """Limit/offset pagination slices the result correctly."""
+    from app.services import notification_feed_service
+
+    alerts = [
+        _alert_orm(created_at=_NOW - timedelta(minutes=i))
+        for i in range(10)
+    ]
+    policy_rows = [_policy_row(a.policy_id, f"Policy {i}") for i, a in enumerate(alerts)]
+
+    db = _make_history_db(alerts, [], policy_rows)
+    user = _user()
+
+    history = await notification_feed_service.get_history(db, user, limit=3, offset=2)
+
+    assert history.total == 10
+    assert len(history.items) == 3
+    assert history.limit == 3
+    assert history.offset == 2
+
+
+# ---------------------------------------------------------------------------
+# H5. No-tenant user returns empty history
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_history_no_tenant_returns_empty():
+    """User with no tenant_id returns empty history without DB queries."""
+    from app.services import notification_feed_service
+
+    user = CurrentUser(user_id="x", tenant_id=None, org_id=None, role="admin")
+    db = AsyncMock()
+
+    history = await notification_feed_service.get_history(db, user)
+
+    assert history.total == 0
+    assert history.items == []
+    db.execute.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# H6. History total reflects full count before pagination
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_history_total_is_pre_pagination_count():
+    """total must reflect the full count even when limit/offset truncates the page."""
+    from app.services import notification_feed_service
+
+    alerts = [_alert_orm(created_at=_NOW - timedelta(seconds=i)) for i in range(20)]
+    policy_rows = [_policy_row(a.policy_id, f"P {i}") for i, a in enumerate(alerts)]
+
+    db = _make_history_db(alerts, [], policy_rows)
+    user = _user()
+
+    history = await notification_feed_service.get_history(db, user, limit=5, offset=0)
+
+    assert history.total == 20
+    assert len(history.items) == 5

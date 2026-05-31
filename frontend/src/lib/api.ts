@@ -1130,3 +1130,42 @@ export interface UsageResponse {
 
 export const getUsage = (token: string) =>
   apiFetch<UsageResponse>("/billing/usage", { token });
+
+// ── Onboarding status (first-run checklist) ─────────────────────────────────────
+
+export interface OnboardingStep {
+  key: string;
+  label: string;
+  description: string;
+  done: boolean;
+  href: string;
+}
+
+export interface OnboardingStatus {
+  steps: OnboardingStep[];
+  complete: boolean;
+  completed_count: number;
+  total: number;
+}
+
+export const getOnboardingStatus = (token: string) =>
+  apiFetch<OnboardingStatus>("/onboarding/status", { token, silent: true });
+
+// ── Notification history (full feed page) ───────────────────────────────────────
+
+export const getNotificationHistory = (
+  token: string,
+  params?: { limit?: number; offset?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<NotificationItem[]>(`/notifications/history${query}`, { token });
+};
+
+// ── Calendar (.ics) — renewal/expiry feed ───────────────────────────────────────
+
+/** Download an iCalendar (.ics) file of all policy expiry/renewal dates. */
+export const downloadCalendar = (token: string) =>
+  downloadAuthed(token, "/calendar.ics", "svault-renewals.ics");

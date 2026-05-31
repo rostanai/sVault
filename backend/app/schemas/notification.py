@@ -1,4 +1,4 @@
-"""In-app notification feed schemas (bell icon)."""
+"""In-app notification feed schemas (bell icon + history page)."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -22,3 +22,12 @@ class NotificationFeed(BaseModel):
 
     unread_count: int
     items: list[NotificationItem]
+
+
+class NotificationHistory(BaseModel):
+    """Paginated history response for the full notification feed page."""
+
+    items: list[NotificationItem]
+    limit: int
+    offset: int
+    total: int

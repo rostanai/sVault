@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getDashboard, type DashboardResponse } from "@/lib/api";
+import {
+  getDashboard,
+  getOnboardingStatus,
+  type DashboardResponse,
+  type OnboardingStatus,
+} from "@/lib/api";
+import { OnboardingChecklist } from "./onboarding-checklist";
 import { formatINR, formatDate, daysLeftVariant, categorylabel, statusLabel } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +43,7 @@ export default function DashboardClient({ token }: Props) {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -44,6 +51,13 @@ export default function DashboardClient({ token }: Props) {
       setLoading(false);
       return;
     }
+    // Best-effort: failure silently hides the checklist (silent: true set in api.ts)
+    getOnboardingStatus(token)
+      .then(setOnboarding)
+      .catch(() => {
+        /* hide on error */
+      });
+
     getDashboard(token)
       .then(setData)
       .catch((err: Error) => setError(err.message))
@@ -64,6 +78,11 @@ export default function DashboardClient({ token }: Props) {
           Your insurance portfolio at a glance
         </p>
       </div>
+
+      {/* Onboarding checklist — shown only while incomplete */}
+      {onboarding && !onboarding.complete && (
+        <OnboardingChecklist status={onboarding} />
+      )}
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
