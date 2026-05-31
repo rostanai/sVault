@@ -315,7 +315,7 @@ export default function BillingClient({ token }: Props) {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+// Sub-components
 
 function PlanCard({
   plan,
@@ -328,7 +328,27 @@ function PlanCard({
   isUpgrading: boolean;
   onUpgrade: () => void;
 }) {
-  const entitlements = Object.entries(plan.entitlements ?? {}).slice(0, 5);
+  const ent = (plan.entitlements ?? {}) as {
+    features?: Record<string, boolean>;
+    limits?: Record<string, number>;
+  };
+  const features = ent.features ?? {};
+  const limits = ent.limits ?? {};
+  const FEATURE_LABELS: [string, string][] = [
+    ["email_alerts", "Email alerts"],
+    ["whatsapp_alerts", "WhatsApp alerts"],
+    ["sms_alerts", "SMS alerts"],
+    ["telegram_alerts", "Telegram alerts"],
+    ["rag", "AI “Ask sVault”"],
+    ["analytics", "Analytics"],
+    ["mfa", "Multi-factor auth"],
+    ["sso", "Single sign-on (SSO)"],
+    ["api", "Developer API"],
+    ["audit_log", "Audit log"],
+    ["document_vault", "Document vault"],
+  ];
+  const fmtLimit = (v: number | undefined) =>
+    v === -1 ? "Unlimited" : v == null ? "—" : String(v);
 
   return (
     <Card
@@ -368,21 +388,63 @@ function PlanCard({
           )}
         </div>
 
-        {/* Entitlements sample */}
-        {entitlements.length > 0 && (
-          <ul className="space-y-1.5">
-            {entitlements.map(([key, val]) => (
+        {/* Limits */}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+          <span>
+            Policies:{" "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {fmtLimit(limits.policies)}
+            </span>
+          </span>
+          <span>
+            Users:{" "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {fmtLimit(limits.users)}
+            </span>
+          </span>
+          <span>
+            Alerts/mo:{" "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {fmtLimit(limits.alerts_month)}
+            </span>
+          </span>
+          <span>
+            Documents:{" "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {fmtLimit(limits.documents)}
+            </span>
+          </span>
+        </div>
+
+        {/* Full feature checklist */}
+        <ul className="space-y-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          {FEATURE_LABELS.map(([key, label]) => {
+            const on = !!features[key];
+            return (
               <li key={key} className="flex items-center gap-2 text-sm">
-                <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                <span className="text-zinc-600 dark:text-zinc-400">
-                  {String(key).replace(/_/g, " ")}
-                  {typeof val === "number" && val > 0 ? `: ${val}` : ""}
-                  {typeof val === "boolean" && !val ? " (limited)" : ""}
+                {on ? (
+                  <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 shrink-0 text-center leading-none text-zinc-300 dark:text-zinc-600"
+                  >
+                    –
+                  </span>
+                )}
+                <span
+                  className={
+                    on
+                      ? "text-zinc-700 dark:text-zinc-300"
+                      : "text-zinc-400 line-through dark:text-zinc-600"
+                  }
+                >
+                  {label}
                 </span>
               </li>
-            ))}
-          </ul>
-        )}
+            );
+          })}
+        </ul>
 
         {isCurrent ? (
           <Button variant="outline" className="w-full" disabled>
