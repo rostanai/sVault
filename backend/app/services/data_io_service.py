@@ -22,7 +22,7 @@ from app.db.models import Policy, Provider
 from app.schemas.policy import PolicyCreate
 from app.schemas.reports import ImportRowError, RenewalReportRow
 from app.services.org_service import is_group_wide
-from app.services.policy_service import create_policy
+from app.services.policy_service import _owner_filter, create_policy
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -120,6 +120,8 @@ async def _fetch_policies_for_export(
     org = _accessible_org_filter(user)
     if org is not None:
         stmt = stmt.where(Policy.org_id == org)
+    if (oid := _owner_filter(user)) is not None:
+        stmt = stmt.where(Policy.owner_id == oid)
     stmt = stmt.order_by(Policy.expiry_date.asc().nullslast())
     policies = list((await db.execute(stmt)).scalars().all())
     provider_map = await _provider_name_map(db, tid)
@@ -140,6 +142,8 @@ async def fetch_renewal_report(
     org = _accessible_org_filter(user)
     if org is not None:
         stmt = stmt.where(Policy.org_id == org)
+    if (oid := _owner_filter(user)) is not None:
+        stmt = stmt.where(Policy.owner_id == oid)
     stmt = stmt.order_by(Policy.expiry_date.asc())
 
     policies = list((await db.execute(stmt)).scalars().all())
