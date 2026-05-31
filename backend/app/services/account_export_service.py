@@ -43,6 +43,7 @@ from app.db.models import (
     Tenant,
 )
 from app.services.org_service import is_group_wide
+from app.services.policy_service import _owner_filter
 
 # Maximum rows returned per collection before truncation.
 COLLECTION_LIMIT = 5_000
@@ -254,6 +255,10 @@ async def build_export(db: AsyncSession, user: CurrentUser) -> dict:
     """
     tenant_id_str: str | None = user.tenant_id
     org: uuid.UUID | None = _accessible_org_id(user)
+    # Object-level: for the owner role, the policies + policy_documents sections are
+    # narrowed to the owner's own policies. Other sections (tenant/orgs/profiles/
+    # providers/installments/approvals) stay tenant/org-scoped as documented.
+    owner_oid: uuid.UUID | None = _owner_filter(user)
 
     exported_at = datetime.now(UTC).isoformat()
 
@@ -328,6 +333,8 @@ async def build_export(db: AsyncSession, user: CurrentUser) -> dict:
     # ---------- policies (org-scoped for non-group-wide callers) ----------
     pol_stmt = select(Policy).where(Policy.tenant_id == t_uuid)
     pol_stmt = _maybe_apply_org_filter(pol_stmt, Policy, org)
+    if owner_oid is not None:
+        pol_stmt = pol_stmt.where(Policy.owner_id == owner_oid)
     pol_stmt = pol_stmt.limit(COLLECTION_LIMIT + 1)
     pol_result = await db.execute(pol_stmt)
     pol_raw = list(pol_result.scalars().all())
@@ -337,6 +344,13 @@ async def build_export(db: AsyncSession, user: CurrentUser) -> dict:
     # ---------- policy documents ----------
     doc_stmt = select(PolicyDocument).where(PolicyDocument.tenant_id == t_uuid)
     doc_stmt = _maybe_apply_org_filter(doc_stmt, PolicyDocument, org)
+    if owner_oid is not None:
+        # PolicyDocument has no owner_id; restrict to docs of the owner's own policies.
+        doc_stmt = doc_stmt.where(
+            PolicyDocument.policy_id.in_(
+                select(Policy.id).where(Policy.owner_id == owner_oid)
+            )
+        )
     doc_stmt = doc_stmt.limit(COLLECTION_LIMIT + 1)
     doc_result = await db.execute(doc_stmt)
     doc_raw = list(doc_result.scalars().all())

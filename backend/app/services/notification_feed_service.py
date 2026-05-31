@@ -23,6 +23,7 @@ from app.db.models.approvals import Approval
 from app.db.models.insurance import Policy
 from app.schemas.notification import NotificationFeed, NotificationHistory, NotificationItem
 from app.services.org_service import is_group_wide
+from app.services.policy_service import _owner_filter
 
 _FEED_CAP = 20
 _COUNT_CAP = 99
@@ -111,6 +112,11 @@ async def get_feed(db: AsyncSession, user: CurrentUser) -> NotificationFeed:
     )
     if org is not None:
         alert_stmt = alert_stmt.where(Alert.org_id == org)
+    # Object-level: an owner's alert feed shows only alerts for their own policies.
+    if (oid := _owner_filter(user)) is not None:
+        alert_stmt = alert_stmt.where(
+            Alert.policy_id.in_(select(Policy.id).where(Policy.owner_id == oid))
+        )
     alert_stmt = alert_stmt.order_by(Alert.created_at.desc())
     alerts = list((await db.execute(alert_stmt)).scalars().all())
 
@@ -190,6 +196,11 @@ async def get_history(
     alert_stmt = select(Alert).where(Alert.tenant_id == tid)
     if org is not None:
         alert_stmt = alert_stmt.where(Alert.org_id == org)
+    # Object-level: an owner's alert history shows only alerts for their own policies.
+    if (oid := _owner_filter(user)) is not None:
+        alert_stmt = alert_stmt.where(
+            Alert.policy_id.in_(select(Policy.id).where(Policy.owner_id == oid))
+        )
     alert_stmt = alert_stmt.order_by(Alert.created_at.desc())
     all_alerts = list((await db.execute(alert_stmt)).scalars().all())
 

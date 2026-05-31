@@ -7,10 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import CurrentUser
-from app.db.models import Alert, AlertRule
+from app.db.models import Alert, AlertRule, Policy
 from app.schemas.alert import AlertRuleRead, AlertRuleUpdate
 from app.services.alert_engine import DEFAULT_CHANNELS, DEFAULT_LEAD_DAYS
-from app.services.policy_service import _accessible_org_filter, get_policy
+from app.services.policy_service import _accessible_org_filter, _owner_filter, get_policy
 
 
 async def get_effective_rule(
@@ -63,6 +63,12 @@ async def list_alerts(
     org = _accessible_org_filter(user)
     if org is not None:
         stmt = stmt.where(Alert.org_id == org)
+    # Object-level: an owner sees alerts only for the policies they own. Alerts carry
+    # no owner_id, so restrict to alerts whose policy is owned by the user.
+    if (oid := _owner_filter(user)) is not None:
+        stmt = stmt.where(
+            Alert.policy_id.in_(select(Policy.id).where(Policy.owner_id == oid))
+        )
     if status:
         stmt = stmt.where(Alert.status == status)
     stmt = stmt.order_by(Alert.scheduled_for.desc()).limit(limit).offset(offset)
