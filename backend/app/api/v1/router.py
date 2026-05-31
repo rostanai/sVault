@@ -8,6 +8,7 @@ from app.api.v1 import (
     ask,
     auth,
     billing,
+    calendar,
     dashboard,
     document_library,
     documents,
@@ -17,6 +18,7 @@ from app.api.v1 import (
     intake,
     invitations,
     notifications,
+    onboarding,
     orgs,
     platform,
     policies,
@@ -52,3 +54,5 @@ api_router.include_router(reports.router)       # renewal report (JSON)
 api_router.include_router(document_library.router)  # document library (cross-policy)
 api_router.include_router(notifications.router)     # in-app notification feed
 api_router.include_router(webhooks.router)          # M7 outbound webhooks
+api_router.include_router(onboarding.router)        # first-run checklist
+api_router.include_router(calendar.router)          # iCalendar (.ics) renewal feed

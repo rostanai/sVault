@@ -1,23 +1,19 @@
-"""In-app notification feed endpoint (bell icon).
+"""In-app notification feed endpoints (bell icon + history page).
 
-GET /notifications
+GET /notifications         — bell feed (unacked alerts + pending approvals, capped 20)
+GET /notifications/history — paginated full history (all statuses, limit/offset)
 
-Returns a merged feed of:
-- Unacknowledged renewal alerts for the caller's accessible policies.
-- Pending approvals in the caller's tenant + org scope.
-
-Items are capped at 20 (newest first).  unread_count reflects the real
-total (capped display at 99) so the bell badge is accurate.
+Both endpoints share the same router so no router.py change is needed.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authz import get_current_user
 from app.core.security import CurrentUser
 from app.db.session import get_db
-from app.schemas.notification import NotificationFeed
+from app.schemas.notification import NotificationFeed, NotificationItem
 from app.services import notification_feed_service
 
 router = APIRouter(tags=["notifications"])
@@ -47,3 +43,30 @@ async def get_notifications(
     Scope: tenant + accessible org(s) — same scoping rules as alerts and approvals.
     """
     return await notification_feed_service.get_feed(db, user)
+
+
+@router.get(
+    "/notifications/history",
+    response_model=list[NotificationItem],
+    summary="Get paginated notification history",
+)
+async def get_notification_history(
+    limit: int = Query(default=50, ge=1, le=200, description="Max items to return"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[NotificationItem]:
+    """Return a paginated history of ALL notifications for the authenticated user.
+
+    Unlike the bell feed, history includes:
+    - **All alerts** regardless of status (scheduled, sent, acknowledged, cancelled …)
+    - **All approvals** regardless of status (pending, approved, rejected, cancelled)
+
+    Items are sorted newest-first.  Use `limit` and `offset` for pagination.
+    The `total` field in the response reflects the full count before pagination.
+
+    Authorization: any authenticated user (no special role required).
+    Scope: tenant + accessible org(s) — same scoping rules as alerts and approvals.
+    """
+    result = await notification_feed_service.get_history(db, user, limit=limit, offset=offset)
+    return result.items
