@@ -3,12 +3,16 @@
 import { useEffect, useState, useCallback } from "react";
 import Script from "next/script";
 import {
+  cancelSubscription,
   getInvoices,
   getPlans,
   getSubscription,
+  pauseSubscription,
+  resumeSubscription,
   subscribe,
   type InvoiceRead,
   type PlanRead,
+  type SubscriptionRead,
   type SubscriptionWithEntitlements,
 } from "@/lib/api";
 import { formatDate, formatINR } from "@/lib/utils";
@@ -31,6 +35,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Check, AlertTriangle, Zap, Download, FileText, Loader2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogClose,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 // Allow TypeScript to recognise the globally injected Razorpay script.
@@ -224,6 +237,11 @@ export default function BillingClient({ token }: Props) {
                   </div>
                 )}
               </div>
+              <SubscriptionLifecycleControls
+                sub={sub}
+                token={token}
+                onSuccess={refreshSubscription}
+              />
             </CardContent>
           </Card>
         )}
@@ -501,6 +519,195 @@ function SubscriptionStatusBadge({ status }: { status: string }) {
     <Badge variant={variants[status] ?? "secondary"} className="capitalize">
       {status.replace(/_/g, " ")}
     </Badge>
+  );
+}
+
+// ── Subscription lifecycle controls (Cancel / Pause / Resume) ────────
+
+type LifecycleAction = "cancel" | "pause" | "resume" | null;
+
+function SubscriptionLifecycleControls({
+  sub,
+  token,
+  onSuccess,
+}: {
+  sub: SubscriptionRead;
+  token: string;
+  onSuccess: () => void;
+}) {
+  const [pendingAction, setPendingAction] = useState<LifecycleAction>(null);
+  const [confirmOpen, setConfirmOpen] = useState<"cancel" | "pause" | null>(null);
+
+  const isActive = sub.status === "active" && !sub.cancel_at_period_end;
+  const isPaused = sub.status === "paused";
+  const isCancelledOrPendingCancel =
+    sub.status === "cancelled" || sub.cancel_at_period_end;
+
+  // None of the lifecycle buttons are relevant for trialing / no-sub states.
+  if (sub.status === "trialing" || (!isActive && !isPaused && !isCancelledOrPendingCancel)) {
+    return null;
+  }
+
+  async function executeAction(action: LifecycleAction) {
+    if (!action) return;
+    setPendingAction(action);
+    setConfirmOpen(null);
+    try {
+      if (action === "cancel") {
+        await cancelSubscription(token);
+        toast.success("Subscription cancelled.", {
+          description: "You'll keep access until the current period ends.",
+          duration: 6000,
+        });
+      } else if (action === "pause") {
+        await pauseSubscription(token);
+        toast.success("Subscription paused.", {
+          description: "Features will be limited until you resume.",
+          duration: 6000,
+        });
+      } else if (action === "resume") {
+        await resumeSubscription(token);
+        toast.success("Subscription resumed.", {
+          description: "Full access has been restored.",
+          duration: 6000,
+        });
+      }
+      onSuccess();
+    } catch {
+      // apiFetch already shows a toast for API errors; nothing extra needed.
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  const busy = pendingAction !== null;
+
+  return (
+    <>
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        {isActive && (
+          <>
+            {/* Pause button */}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              aria-label="Pause subscription"
+              onClick={() => setConfirmOpen("pause")}
+            >
+              {pendingAction === "pause" ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Pause
+            </Button>
+
+            {/* Cancel button */}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              aria-label="Cancel subscription"
+              className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
+              onClick={() => setConfirmOpen("cancel")}
+            >
+              {pendingAction === "cancel" ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Cancel subscription
+            </Button>
+          </>
+        )}
+
+        {(isPaused || isCancelledOrPendingCancel) && (
+          <Button
+            size="sm"
+            disabled={busy}
+            aria-label="Resume subscription"
+            className="bg-brand-600 text-white hover:bg-brand-700 focus-visible:ring-brand-600"
+            onClick={() => executeAction("resume")}
+          >
+            {pendingAction === "resume" ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : null}
+            Resume
+          </Button>
+        )}
+      </div>
+
+      {/* Cancel confirm dialog */}
+      <Dialog
+        open={confirmOpen === "cancel"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmOpen(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel your subscription?</DialogTitle>
+            <DialogDescription>
+              You&apos;ll keep full access until the current billing period ends,
+              then fall back to the Free plan. This action can be undone by
+              resuming before the period ends.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="outline" size="sm" disabled={busy}>
+                Keep subscription
+              </Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              disabled={busy}
+              className="border-red-300 bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600"
+              onClick={() => executeAction("cancel")}
+              aria-label="Confirm cancel subscription"
+            >
+              {pendingAction === "cancel" ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Yes, cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pause confirm dialog */}
+      <Dialog
+        open={confirmOpen === "pause"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmOpen(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pause your subscription?</DialogTitle>
+            <DialogDescription>
+              Some features will be limited while the subscription is paused.
+              You can resume at any time to restore full access.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="outline" size="sm" disabled={busy}>
+                Keep active
+              </Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => executeAction("pause")}
+              aria-label="Confirm pause subscription"
+            >
+              {pendingAction === "pause" ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Yes, pause
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
