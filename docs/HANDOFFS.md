@@ -502,3 +502,61 @@
 - router.py: NOT touched. The endpoint maps `**result` into `SubscribeResponse(**result)` — the new `payment_required` key flows through automatically.
 - ruff: all checks passed. pytest: 189 passed (was 186; 3 new tests added), 0 failed.
 - Handoff to: ui-ux-designer / frontend to read `payment_required` from `POST /billing/subscribe` and skip checkout when False.
+
+### 2026-05-31 — notifications-engineer — snooze, mark-renewed, escalation
+
+- Did: Added three capabilities to the alert engine: snooze, mark-renewed, and escalation dispatch.
+
+**Snooze** (`POST /alerts/{alert_id}/snooze`, body `{days: 1–90}`):
+- Pushes `alert.scheduled_for` forward by `days`, resets `status` to `"scheduled"`, clears `acknowledged_by/at`.
+- Tenant-scoped: cross-tenant alert ID returns 404 (never-reveal).
+- Guard: `policy:read` (same as list/ack path).
+- Service: `alert_engine.snooze()`.
+- Schema: `SnoozeRequest` (validated 1–90), `SnoozeResponse` added to `app/schemas/alert.py`.
+
+**Mark-renewed** (`POST /policies/{policy_id}/mark-renewed`):
+- Sets `policy.status = "renewed"`, bulk-cancels all alerts for that policy where `status IN ('scheduled', 'sent')`.
+- Guard: `policy:update`.
+- Service: `policy_service.mark_renewed()` — uses `sqlalchemy update()` for the bulk cancel; preserves notification_log history.
+- Returns full `PolicyRead`.
+
+**Escalation** (internal, in dispatch path):
+- Rule: `AlertRule.escalate = True` AND `lead_day <= 7` (final 7-day / 1-day reminders) AND `alert.status != "acknowledged"` at dispatch time.
+- Behaviour: calls `dispatch_escalation(db, alert, policy, escalation_profile)` — queries for the first active manager/admin in the tenant, sends via email adapter, writes a `notification_log` row with `template="escalation"` so it is distinguishable in reporting.
+- Best-effort: any error is caught, logged, and never blocks the main scan loop. The cron return shape `{date, alerts_created, dispatched}` is unchanged.
+- `dispatch_escalation` lives in `app/services/notifications/dispatcher.py` alongside `dispatch_alert`.
+
+**Files touched:**
+- `backend/app/schemas/alert.py` — `SnoozeRequest`, `SnoozeResponse`
+- `backend/app/api/v1/alerts.py` — `POST /alerts/{alert_id}/snooze`
+- `backend/app/api/v1/policies.py` — `POST /policies/{policy_id}/mark-renewed`
+- `backend/app/services/alert_engine.py` — `snooze()`, escalation wiring in `scan_and_dispatch`, `_find_escalation_recipient()`
+- `backend/app/services/policy_service.py` — `mark_renewed()`
+- `backend/app/services/notifications/dispatcher.py` — `dispatch_escalation()`, `_build_escalation_message()`, `_write_log()` gains `template` param
+- `backend/tests/test_m4_alerts.py` — 12 new tests
+
+**router.py: NOT touched.** Snooze is under `alerts.router` (already included); mark-renewed is under `policies.router` (already included).
+
+**ruff:** all checks passed. **pytest:** 243 passed (was 231; 12 new tests added), 0 failed.
+
+- Handoff to: api-engineer to document the two new endpoints in API_CONTRACT; ui-ux-designer for the snooze/mark-renewed UI actions on the alerts table.
+
+### 2026-05-31 — ui-ux-designer — Reports page + Policies import/export UI
+
+**Done:**
+- Created `frontend/src/app/app/reports/page.tsx` — server component using the same `createClient()` / `session.access_token` token pattern as all other app pages.
+- Created `frontend/src/app/app/reports/reports-client.tsx` — full client component wired to `getRenewalReport` + `exportRenewalReport`. Features: 30/60/90/180-day window selector chips (brand-600 active state), "Export CSV" / "Export Excel" header buttons with per-button `Loader2` spinner, table of `RenewalReportRow` (Policy title+category, Provider, Expiry, Days Left badge via `daysLeftVariant`, Premium/Sum Insured in INR, Status badge), loading skeleton (6 rows), empty state with dynamic window mention, error state with Retry affordance. All icons have `aria-hidden`; export buttons carry `aria-label`.
+- Edited `frontend/src/app/app/policies/policies-client.tsx` — added to the header button group: Export CSV button, Export Excel button (both call `exportPolicies`, show `Loader2` while in flight), Import button (triggers hidden `<input type="file" accept=".xlsx,.csv" class="sr-only">` via `useRef`). On file select, calls `importPolicies(token, file)` with `Loader2` state; on success opens an import-result dialog showing created count, skipped count, and up to 10 row-level error messages (scrollable list). After a successful import with `created > 0`, calls the existing `fetchPolicies()` function to refresh the table. All existing functionality (Add Policy, AI Intake) is intact.
+
+**Policy list refresh function reused:** `fetchPolicies` (defined via `useCallback` at line ~142 of the original file).
+
+**Files created:**
+- `/var/www/ai/sVault.rstglobal.in/frontend/src/app/app/reports/page.tsx`
+- `/var/www/ai/sVault.rstglobal.in/frontend/src/app/app/reports/reports-client.tsx`
+
+**Files edited:**
+- `/var/www/ai/sVault.rstglobal.in/frontend/src/app/app/policies/policies-client.tsx`
+
+**Not touched:** `src/lib/api.ts`, `app-shell.tsx`.
+
+**Handoff to:** tech-lead to wire the `/app/reports` nav entry in app-shell.
