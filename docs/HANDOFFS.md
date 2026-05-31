@@ -608,3 +608,36 @@
 - Not touched: `app/api/v1/router.py` (billing.router already included).
 - Results: ruff clean (touched files), 262/262 tests pass (up from 243).
 - Coordinates with: notifications-engineer (dunning on pause/cancel), api-engineer (no new gated endpoints needed).
+
+### 2026-05-31 — billing-engineer — plan usage / metering endpoint
+- Did: added `GET /billing/usage` (any authenticated user, tenant-scoped) returning current resource counts vs plan limits.
+  - `app/schemas/billing.py`: added `UsageMetric` (used, limit) and `UsageResponse` (plan_tier, status, usage dict).
+  - `app/services/usage_service.py` (new file): `get_usage(db, tenant_id)` — resolves tier+status from subscription row, calls `get_entitlements()` for limits, runs 4 aggregate COUNT queries, returns `UsageResponse`.
+  - `app/api/v1/billing.py`: added `GET /billing/usage` endpoint using `_authed` dep; imports `UsageResponse` and `usage_service`.
+  - `tests/test_m5_billing.py`: 6 new tests (5 service-level + 1 endpoint 401 guard) covering free-tier limits, trialing/Pro limits, active-plan limits from `plan.entitlements`, -1 unlimited pass-through, cancelled fallback to free, and 401 without token.
+- Not touched: `app/api/v1/router.py` (billing.router already included).
+- Counting decisions (documented in usage_service.py docstring):
+  - policies: excludes `cancelled` status (no active slot held); draft + pending_approval are counted.
+  - users: counts only `is_active=True` profiles.
+  - documents: all rows (vault storage consumed regardless of policy state).
+  - alerts_month: all non-cancelled alerts with `scheduled_for` in current UTC calendar month (open-ended upper bound via `< first_of_next_month`).
+- Results: ruff clean (all touched files), 280/280 non-webhook tests pass (269 baseline + 6 new; 4 pre-existing test_webhooks.py failures unrelated to this work).
+
+### 2026-05-31 — api-engineer — outbound webhooks (M7 developer integration)
+- Did: implemented the full outbound webhook subsystem — ORM, schemas, service, API router, event firing in approval and alert engine, and tests.
+- Files created:
+  - `backend/app/db/models/webhooks.py`: `Webhook` ORM model matching the `webhooks` table.
+  - `backend/app/schemas/webhook.py`: `WebhookCreate`, `WebhookRead`, `WebhookCreated` (secret once), `WebhookTestResult`.
+  - `backend/app/services/webhook_service.py`: `create`, `list_webhooks`, `delete`, `deliver` (HMAC-SHA256, best-effort, swallows all errors), `test_webhook`, `generate_secret` (`whsec_` prefix), `_sign`.
+  - `backend/app/api/v1/webhooks.py`: `GET /webhooks`, `POST /webhooks` (201), `DELETE /webhooks/{id}` (204), `POST /webhooks/{id}/test` — all guarded by `apikey:manage` (Admin only).
+  - `backend/tests/test_webhooks.py`: 23 tests covering secret format, create/list/delete, HMAC signature correctness, subscription filter (active + event-matched only), 401 guards, test-delivery result shape, connection error handling, and db-error swallowing.
+- Files edited:
+  - `backend/app/db/models/__init__.py`: registered `Webhook` import + `__all__` entry.
+  - `backend/app/services/approval_service.py`: `submit()` fires `approval.pending` webhook event after commit (lazy import, best-effort try/except).
+  - `backend/app/services/alert_engine.py`: `scan_and_dispatch()` fires `renewal.due` webhook event per alert (lazy import, best-effort try/except).
+- NOT edited: `app/api/v1/router.py` (as instructed), `app/services/policy_service.py`.
+- router.py include lines (report only, tech-lead to add):
+  - `from app.api.v1 import webhooks`
+  - `api_router.include_router(webhooks.router)  # M7 outbound webhooks`
+- Permission used: `apikey:manage` (Admin-only, already in the matrix) — webhook management is a developer-integration control colocated with API key management.
+- Results: ruff clean (all files), 306/306 tests pass (up from 269 baseline; 37 new tests added across webhooks + existing test files from prior waves).
