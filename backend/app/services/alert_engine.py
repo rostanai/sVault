@@ -5,6 +5,10 @@ expiry is exactly `lead_day` days away (computed in IST), schedules an alert per
 (policy, lead_day, channel), dispatches via the notifier, and logs delivery.
 Idempotent: the unique (policy_id, lead_day, channel) constraint means each reminder
 fires at most once, ever.
+
+Channel delivery is handled by ``app.services.notifications.dispatcher.dispatch_alert``
+which picks the right adapter (WhatsApp / SMS / Telegram / email), sends in simulated
+mode when credentials are absent, and always writes a ``notification_log`` row.
 """
 from __future__ import annotations
 
@@ -16,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import Alert, AlertRule, NotificationLog, Policy, Profile
-from app.services import notifier
+from app.db.models import Alert, AlertRule, Policy, Profile
+from app.services.notifications.dispatcher import dispatch_alert
 
 DEFAULT_LEAD_DAYS = [60, 30, 15, 7, 1]
 DEFAULT_CHANNELS = ["whatsapp", "email"]
@@ -103,15 +107,9 @@ async def scan_and_dispatch(db: AsyncSession, today: date | None = None) -> dict
                 await db.flush()
                 created += 1
 
-                recipient = await _recipient(db, p, ch)
-                result = await notifier.send(ch, recipient, build_message(p, d))
-                db.add(NotificationLog(
-                    tenant_id=p.tenant_id, alert_id=alert.id, policy_id=p.id,
-                    recipient=recipient, channel=ch, template="renewal_reminder",
-                    status=result.status, provider_msg_id=result.provider_msg_id,
-                    error=result.error,
-                ))
-                alert.status = "failed" if result.status == "failed" else "sent"
+                # dispatch_alert resolves recipient, calls the channel adapter,
+                # writes a notification_log row, and updates alert.status.
+                await dispatch_alert(db, alert)
                 dispatched += 1
     await db.commit()
     return {"date": str(today), "alerts_created": created, "dispatched": dispatched}
