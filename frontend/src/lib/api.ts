@@ -768,7 +768,7 @@ export const revokeApiKey = (token: string, keyId: string) =>
     silent: true,
   });
 
-// ── Super Admin / Platform (super_admin only) ────────────────────────────────────
+// ── Super Admin / Platform (super_admin only) ───────────────────────────────────
 
 export interface PlatformTenant {
   id: string;
