@@ -5,6 +5,7 @@ import {
   getAlerts,
   getPolicies,
   acknowledgeAlert,
+  snoozeAlert,
   type AlertRead,
   type PolicyRead,
 } from "@/lib/api";
@@ -20,11 +21,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   Bell,
   BellOff,
   Check,
+  ChevronDown,
+  Clock,
   Loader2,
   AlertTriangle,
   MessageSquare,
@@ -88,6 +97,7 @@ export default function AlertsClient({ token }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<AlertStatusFilter>("all");
   const [ackingId, setAckingId] = useState<string | null>(null);
+  const [snoozingId, setSnoozingId] = useState<string | null>(null);
 
   const fetchData = useCallback(() => {
     if (!token) return;
@@ -143,6 +153,25 @@ export default function AlertsClient({ token }: Props) {
       // apiFetch already toasted
     } finally {
       setAckingId(null);
+    }
+  }
+
+  async function handleSnooze(alertId: string, days: number) {
+    setSnoozingId(alertId);
+    try {
+      const updated = await snoozeAlert(token, alertId, days);
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === alertId
+            ? { ...a, status: updated.status, scheduled_for: updated.scheduled_for }
+            : a
+        )
+      );
+      toast.success(`Snoozed ${days} day${days === 1 ? "" : "s"}.`);
+    } catch {
+      // apiFetch already toasted
+    } finally {
+      setSnoozingId(null);
     }
   }
 
@@ -203,6 +232,8 @@ export default function AlertsClient({ token }: Props) {
               {displayed.map((alert) => {
                 const meta = policyMap.get(alert.policy_id);
                 const isAcking = ackingId === alert.id;
+                const isSnoozing = snoozingId === alert.id;
+                const isBusy = isAcking || isSnoozing;
 
                 return (
                   <TableRow key={alert.id}>
@@ -260,23 +291,61 @@ export default function AlertsClient({ token }: Props) {
                     {/* Actions */}
                     <TableCell className="text-right">
                       {alert.status !== "acknowledged" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isAcking}
-                          onClick={() => handleAcknowledge(alert.id)}
-                          aria-label={`Acknowledge alert ${alert.id}`}
-                          className="h-7 px-2.5 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                        >
-                          {isAcking ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <>
-                              <Check className="mr-1 h-3.5 w-3.5" />
-                              Acknowledge
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Acknowledge */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isBusy}
+                            onClick={() => handleAcknowledge(alert.id)}
+                            aria-label={`Acknowledge alert for policy ${meta?.title ?? alert.policy_id}`}
+                            className="h-7 px-2.5 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                          >
+                            {isAcking ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <>
+                                <Check className="mr-1 h-3.5 w-3.5" />
+                                Acknowledge
+                              </>
+                            )}
+                          </Button>
+
+                          {/* Snooze */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={isBusy}
+                                aria-label={`Snooze alert for policy ${meta?.title ?? alert.policy_id}`}
+                                className="h-7 px-2.5 text-xs text-zinc-600 border-zinc-200 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                              >
+                                {isSnoozing ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Clock className="mr-1 h-3.5 w-3.5" />
+                                    Snooze
+                                    <ChevronDown className="ml-1 h-3 w-3 opacity-60" />
+                                  </>
+                                )}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-36">
+                              {([1, 3, 7] as const).map((days) => (
+                                <DropdownMenuItem
+                                  key={days}
+                                  onClick={() => handleSnooze(alert.id, days)}
+                                  className="text-sm cursor-pointer"
+                                >
+                                  <Clock className="mr-2 h-3.5 w-3.5 text-zinc-400" />
+                                  {days} day{days === 1 ? "" : "s"}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       ) : (
                         <div className="flex items-center justify-end gap-1 text-xs text-zinc-400">
                           <Check className="h-3 w-3 shrink-0" />
