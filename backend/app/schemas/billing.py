@@ -85,6 +85,11 @@ class SubscribeResponse(BaseModel):
     plan_id: str
     razorpay_subscription_id: str | None = None
     short_url: str | None = None
+    payment_required: bool = False
+    """True when a real Razorpay checkout is needed (branch 1: live keys + razorpay_plan_id set).
+    False when the upgrade was immediately activated in simulated/demo mode (branch 2: no live
+    Razorpay configured or plan has no razorpay_plan_id).  The frontend should open the checkout
+    flow only when this is True; otherwise it should simply refresh the subscription state."""
 
 
 # ---------------------------------------------------------------------------
