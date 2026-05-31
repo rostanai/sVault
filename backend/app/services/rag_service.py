@@ -68,6 +68,37 @@ def _extract_text(raw: bytes, mime: str | None) -> str:
         return ""
 
 
+async def index_bytes(db: AsyncSession, doc: PolicyDocument, policy, raw: bytes) -> int:
+    """(Re)index already-downloaded document ``raw`` bytes into document_chunks.
+
+    Extracts text, chunks it, and replaces any existing chunks for the document.
+    The CALLER is responsible for scope-checking ``doc``/``policy`` first. Lets the
+    upload path reuse bytes it already downloaded (no second fetch). Returns the
+    number of chunks stored (0 for non-PDF / unextractable documents).
+    """
+    text_content = _extract_text(raw, doc.mime_type)
+    if not text_content.strip():
+        return 0
+
+    prefix = f"Policy: {policy.title} ({policy.category}) — " if policy else ""
+    chunks = [prefix + c for c in chunk_text(text_content)]
+
+    await db.execute(
+        text("delete from document_chunks where document_id = :d"), {"d": str(doc.id)}
+    )
+    for c in chunks:
+        await db.execute(
+            text(
+                "insert into document_chunks (tenant_id, org_id, policy_id, document_id, content)"
+                " values (:t, :o, :p, :d, :c)"
+            ),
+            {"t": str(doc.tenant_id), "o": str(doc.org_id), "p": str(doc.policy_id),
+             "d": str(doc.id), "c": c},
+        )
+    await db.commit()
+    return len(chunks)
+
+
 async def ingest_document(db: AsyncSession, user: CurrentUser, document_id: uuid.UUID) -> int:
     """Download a policy document, extract text, chunk it, store rows in document_chunks."""
     doc = await db.get(PolicyDocument, document_id)
@@ -90,27 +121,7 @@ async def ingest_document(db: AsyncSession, user: CurrentUser, document_id: uuid
     except httpx.HTTPError as exc:
         raise AppError(ErrorCode.upstream_error, "Could not read document") from exc
 
-    text_content = _extract_text(raw, doc.mime_type)
-    if not text_content.strip():
-        return 0
-
-    prefix = f"Policy: {policy.title} ({policy.category}) — " if policy else ""
-    chunks = [prefix + c for c in chunk_text(text_content)]
-
-    await db.execute(
-        text("delete from document_chunks where document_id = :d"), {"d": str(document_id)}
-    )
-    for c in chunks:
-        await db.execute(
-            text(
-                "insert into document_chunks (tenant_id, org_id, policy_id, document_id, content)"
-                " values (:t, :o, :p, :d, :c)"
-            ),
-            {"t": str(doc.tenant_id), "o": str(doc.org_id), "p": str(doc.policy_id),
-             "d": str(document_id), "c": c},
-        )
-    await db.commit()
-    return len(chunks)
+    return await index_bytes(db, doc, policy, raw)
 
 
 async def _retrieve(db: AsyncSession, user: CurrentUser, question: str, limit: int = 8):

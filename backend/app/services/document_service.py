@@ -1,6 +1,7 @@
 """Policy document service — signed-URL upload flow + metadata, scope-checked."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import date
@@ -70,15 +71,19 @@ async def list_documents(
             .order_by(PolicyDocument.created_at.desc())
         )
     ).scalars().all()
-    out = []
-    for d in rows:
-        url = await storage.create_signed_download_url(d.storage_path)
-        out.append({
+    # Sign all download URLs concurrently (one storage round-trip each) rather than
+    # serially — N sequential calls collapse into one parallel batch.
+    urls = await asyncio.gather(
+        *(storage.create_signed_download_url(d.storage_path) for d in rows)
+    )
+    return [
+        {
             "id": d.id, "file_name": d.file_name, "doc_type": d.doc_type,
             "mime_type": d.mime_type, "size_bytes": d.size_bytes, "version": d.version,
             "created_at": d.created_at, "download_url": url,
-        })
-    return out
+        }
+        for d, url in zip(rows, urls, strict=True)
+    ]
 
 
 async def auto_process_document(
@@ -116,23 +121,32 @@ async def auto_process_document(
         "notes": None,
     }
 
-    # 1) Index for Ask sVault (RAG). Lexical full-text — no embeddings provider.
-    from app.services import rag_service
-
-    try:
-        out["indexed_chunks"] = await rag_service.ingest_document(db, user, document_id)
-    except Exception as exc:  # never let indexing failure break the flow
-        log.warning("auto_index_failed | doc=%s | %s", document_id, exc)
-
-    # 2) AI field extraction (text PDFs only).
-    from app.services import extraction_service
-
+    # Download the file ONCE and reuse the bytes for both indexing and AI extraction
+    # (previously fetched twice). A download failure degrades gracefully to a note.
+    raw: bytes | None = None
     try:
         url = await storage.create_signed_download_url(doc.storage_path)
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             raw = resp.content
+    except Exception as exc:
+        log.warning("auto_download_failed | doc=%s | %s", document_id, exc)
+        out["notes"] = "Could not read this document."
+        return out
+
+    # 1) Index for Ask sVault (RAG). Lexical full-text — no embeddings provider.
+    from app.services import rag_service
+
+    try:
+        out["indexed_chunks"] = await rag_service.index_bytes(db, doc, policy, raw)
+    except Exception as exc:  # never let indexing failure break the flow
+        log.warning("auto_index_failed | doc=%s | %s", document_id, exc)
+
+    # 2) AI field extraction (text PDFs only) — reuses the bytes from above.
+    from app.services import extraction_service
+
+    try:
         result = await extraction_service.extract_policy_fields(raw, doc.mime_type, ai_key)
         out["extracted"] = result
         out["notes"] = result.get("notes")
