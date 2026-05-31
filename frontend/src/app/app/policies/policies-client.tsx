@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   getPolicies,
   getOrgs,
   createPolicy,
   setAlertRule,
+  exportPolicies,
+  importPolicies,
   type PolicyRead,
   type OrgRead,
   type PolicyCategory,
   type PolicyExtraction,
+  type ImportResult,
 } from "@/lib/api";
 import {
   formatDate,
@@ -39,6 +42,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
@@ -50,7 +54,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Search, FileText, AlertTriangle, Sparkles } from "lucide-react";
+import {
+  Plus,
+  Search,
+  FileText,
+  AlertTriangle,
+  Sparkles,
+  Upload,
+  FileDown,
+  Loader2,
+} from "lucide-react";
 import AiIntakeDialog from "./ai-intake-dialog";
 
 const CATEGORIES: { value: PolicyCategory; label: string }[] = [
@@ -116,6 +129,16 @@ export default function PoliciesClient({ token }: Props) {
   // AI Intake dialog
   const [intakeOpen, setIntakeOpen] = useState(false);
 
+  // Import state
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importResultOpen, setImportResultOpen] = useState(false);
+
+  // Export state
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+
   const fetchPolicies = useCallback(() => {
     if (!token) return;
     setLoading(true);
@@ -167,6 +190,39 @@ export default function PoliciesClient({ token }: Props) {
         description: "Add them under Providers to link future policies.",
         duration: 8000,
       });
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset the input so the same file can be re-selected if needed
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const result = await importPolicies(token, file);
+      setImportResult(result);
+      setImportResultOpen(true);
+      if (result.created > 0) {
+        fetchPolicies();
+      }
+    } catch {
+      // importPolicies already shows a sonner toast on failure
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function handleExportPolicies(format: "csv" | "xlsx") {
+    const setSaving =
+      format === "csv" ? setExportingCsv : setExportingXlsx;
+    setSaving(true);
+    try {
+      await exportPolicies(token, format);
+    } catch {
+      // downloadAuthed already shows a toast
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -251,6 +307,64 @@ export default function PoliciesClient({ token }: Props) {
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Hidden file input for import */}
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.csv"
+            className="sr-only"
+            aria-label="Import policies from CSV or Excel file"
+            onChange={handleImportFile}
+          />
+
+          {/* Export CSV */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleExportPolicies("csv")}
+            disabled={exportingCsv}
+            aria-label="Export all policies as CSV"
+          >
+            {exportingCsv ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <FileDown className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            )}
+            CSV
+          </Button>
+
+          {/* Export Excel */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleExportPolicies("xlsx")}
+            disabled={exportingXlsx}
+            aria-label="Export all policies as Excel"
+          >
+            {exportingXlsx ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <FileDown className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            )}
+            Excel
+          </Button>
+
+          {/* Import button */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            aria-label="Import policies from a CSV or Excel file"
+          >
+            {importing ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Upload className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            )}
+            {importing ? "Importing…" : "Import"}
+          </Button>
+
           {/* AI Intake button */}
           <Button
             size="sm"
@@ -535,6 +649,72 @@ export default function PoliciesClient({ token }: Props) {
           </SelectContent>
         </Select>
       </div>
+
+      {/* Import result dialog */}
+      <Dialog open={importResultOpen} onOpenChange={setImportResultOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-4 w-4 text-brand-600" aria-hidden="true" />
+              Import complete
+            </DialogTitle>
+            {importResult && (
+              <DialogDescription asChild>
+                <div className="space-y-1 text-sm">
+                  <p>
+                    <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                      {importResult.created}
+                    </span>{" "}
+                    {importResult.created === 1 ? "policy" : "policies"} imported
+                    {importResult.skipped > 0 && (
+                      <span className="text-zinc-400">
+                        {" "}
+                        &middot; {importResult.skipped} skipped
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </DialogDescription>
+            )}
+          </DialogHeader>
+
+          {importResult && importResult.errors.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                {importResult.errors.length}{" "}
+                {importResult.errors.length === 1 ? "row" : "rows"} had errors:
+              </p>
+              <ul className="space-y-1.5 max-h-48 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800 p-2">
+                {importResult.errors.slice(0, 10).map((e, idx) => (
+                  <li
+                    key={idx}
+                    className="flex gap-2 text-xs text-zinc-600 dark:text-zinc-400"
+                  >
+                    <span className="shrink-0 font-mono text-zinc-400">
+                      Row {e.row}:
+                    </span>
+                    <span>{e.message}</span>
+                  </li>
+                ))}
+                {importResult.errors.length > 10 && (
+                  <li className="text-xs text-zinc-400 italic">
+                    …and {importResult.errors.length - 10} more errors.
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              size="sm"
+              onClick={() => setImportResultOpen(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Table */}
       {loading ? (

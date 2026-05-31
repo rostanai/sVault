@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 Channel = Literal["whatsapp", "email", "sms", "telegram"]
 
@@ -35,6 +35,16 @@ class AlertRead(BaseModel):
     scheduled_for: date
     status: str
     acknowledged_at: datetime | None
+
+
+class SnoozeRequest(BaseModel):
+    days: int = Field(..., ge=1, le=90, description="Days to push the alert forward (1–90)")
+
+
+class SnoozeResponse(BaseModel):
+    id: uuid.UUID
+    status: str
+    scheduled_for: date
 
 
 class DispatchSummary(BaseModel):

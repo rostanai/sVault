@@ -1,4 +1,4 @@
-"""Alert engine endpoints (M4) — rule config, listing, ack, cron dispatch."""
+"""Alert engine endpoints (M4) — rule config, listing, ack, snooze, cron dispatch."""
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -14,6 +14,8 @@ from app.schemas.alert import (
     AlertRuleRead,
     AlertRuleUpdate,
     DispatchSummary,
+    SnoozeRequest,
+    SnoozeResponse,
 )
 from app.services import alert_engine, alert_service
 
@@ -70,6 +72,27 @@ async def acknowledge_alert(
     if alert is None:
         raise not_found("Alert not found")
     return {"id": str(alert.id), "status": alert.status}
+
+
+@router.post("/alerts/{alert_id}/snooze", response_model=SnoozeResponse)
+async def snooze_alert(
+    alert_id: uuid.UUID,
+    payload: SnoozeRequest,
+    user: CurrentUser = Depends(_read),
+    db: AsyncSession = Depends(get_db),
+) -> SnoozeResponse:
+    """Push the alert's scheduled_for date forward by payload.days and reset to scheduled.
+
+    Tenant-scoped: returns 404 if the alert does not exist or belongs to a different tenant.
+    """
+    alert = await alert_engine.snooze(db, user, alert_id, payload.days)
+    if alert is None:
+        raise not_found("Alert not found")
+    return SnoozeResponse(
+        id=alert.id,
+        status=alert.status,
+        scheduled_for=alert.scheduled_for,
+    )
 
 
 @router.post(

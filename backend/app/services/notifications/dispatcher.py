@@ -48,6 +48,7 @@ _ADAPTER_MODULES = {
 }
 
 _TEMPLATE_NAME = "renewal_reminder"
+_ESCALATION_TEMPLATE = "escalation"
 
 
 def _build_message(policy: Policy, lead_day: int) -> str:
@@ -136,6 +137,7 @@ def _write_log(
     alert: Alert,
     recipient: str | None,
     result: SendResult,
+    template: str = _TEMPLATE_NAME,
 ) -> None:
     """Append a NotificationLog row.  DB commit is the caller's responsibility."""
     db.add(
@@ -145,10 +147,76 @@ def _write_log(
             policy_id=alert.policy_id,
             recipient=recipient,
             channel=alert.channel,
-            template=_TEMPLATE_NAME,
+            template=template,
             status=result.status,
             provider_msg_id=result.provider_msg_id,
             error=result.error,
             sent_at=datetime.now(ZoneInfo(settings.timezone)),
         )
     )
+
+
+def _build_escalation_message(policy: Policy, lead_day: int) -> str:
+    return (
+        f"[ESCALATION] Unacknowledged renewal alert: policy '{policy.title}' "
+        f"({policy.category}) expires on {policy.expiry_date} — {lead_day} day(s) left. "
+        f"No acknowledgement received; please follow up with the policy owner."
+    )
+
+
+async def dispatch_escalation(
+    db: AsyncSession,
+    alert: Alert,
+    policy: Policy,
+    escalation_profile: object,  # Profile | None — kept as object to avoid circular import
+) -> None:
+    """Send an escalation notification to the manager/admin and log it.
+
+    Best-effort: any error is caught and logged; the caller's flow is never interrupted.
+    The log row carries ``template="escalation"`` so it is distinguishable in reporting.
+    Uses the email channel regardless of the alert's primary channel.
+    """
+    try:
+        if escalation_profile is None:
+            logger.debug(
+                "dispatch_escalation: no manager/admin found for tenant %s",
+                alert.tenant_id,
+            )
+            _write_log(
+                db, alert, recipient=None,
+                result=SendResult(
+                    status="failed",
+                    error="no escalation recipient found in tenant",
+                ),
+                template=_ESCALATION_TEMPLATE,
+            )
+            return
+
+        recipient = getattr(escalation_profile, "email", None)
+        if not recipient:
+            _write_log(
+                db, alert, recipient=None,
+                result=SendResult(
+                    status="failed",
+                    error="escalation recipient has no email",
+                ),
+                template=_ESCALATION_TEMPLATE,
+            )
+            return
+
+        message = _build_escalation_message(policy, alert.lead_day)
+        result = await email.send(recipient, message, template=_ESCALATION_TEMPLATE)
+        _write_log(db, alert, recipient=recipient, result=result, template=_ESCALATION_TEMPLATE)
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "dispatch_escalation unexpected error for alert %s: %s", alert.id, exc
+        )
+        try:
+            _write_log(
+                db, alert, recipient=None,
+                result=SendResult(status="failed", error=f"internal: {exc}"),
+                template=_ESCALATION_TEMPLATE,
+            )
+        except Exception:  # noqa: BLE001
+            pass

@@ -67,3 +67,16 @@ async def delete_policy(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await policy_service.delete_policy(db, user, policy_id)
+
+
+@router.post("/{policy_id}/mark-renewed", response_model=PolicyRead)
+async def mark_policy_renewed(
+    policy_id: uuid.UUID,
+    user: CurrentUser = Depends(_update),
+    db: AsyncSession = Depends(get_db),
+) -> PolicyRead:
+    """Mark a policy as renewed and cancel all its pending/sent alerts.
+
+    Requires policy:update permission. Tenant- and org-scoped (404 if not accessible).
+    """
+    return await policy_service.mark_renewed(db, user, policy_id)

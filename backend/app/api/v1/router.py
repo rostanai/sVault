@@ -10,7 +10,9 @@ from app.api.v1 import (
     billing,
     dashboard,
     documents,
+    exports,
     health,
+    imports,
     intake,
     invitations,
     orgs,
@@ -18,6 +20,7 @@ from app.api.v1 import (
     policies,
     providers,
     public,
+    reports,
     users,
 )
 
@@ -40,3 +43,6 @@ api_router.include_router(ask.router)           # AI "Ask sVault" (RAG)
 api_router.include_router(intake.router)        # AI policy auto-intake (extract)
 api_router.include_router(api_keys.router)      # M7 developer API key management
 api_router.include_router(public.router)        # M7 public developer API (API-key auth)
+api_router.include_router(exports.router)       # policy + renewal export (CSV/XLSX)
+api_router.include_router(imports.router)       # bulk policy import (CSV/XLSX)
+api_router.include_router(reports.router)       # renewal report (JSON)
