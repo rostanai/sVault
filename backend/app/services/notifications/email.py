@@ -1,31 +1,31 @@
-"""Email adapter — transactional email via HTTP provider.
+"""Email adapter — transactional email via SMTP or HTTP provider.
 
 Transactional email notes
 -------------------------
-- Use a transactional provider (SendGrid, Amazon SES, Resend, Postmark) rather than SMTP
-  for better deliverability and bounce handling.
+- SMTP (any server: Gmail, your host, Amazon SES SMTP) is used when ``SMTP_HOST``
+  is set. Otherwise the Resend HTTP API is used when ``EMAIL_API_KEY`` is set.
+  With neither configured the adapter runs in simulated mode (logs intent only).
 - For India compliance, ensure the sender domain has SPF/DKIM/DMARC records configured.
 - Policy documents can be attached to emails; the base adapter sends text only.
-  Attach PDFs when the caller passes an ``attachments`` kwarg in a future extension.
 
-Real-send shape
----------------
-This adapter targets the **Resend** HTTP API (https://resend.com) as a representative
-transactional provider.  The API is simple and idiomatic:
-
+Resend HTTP fallback shape
+--------------------------
   POST https://api.resend.com/emails
   Authorization: Bearer {EMAIL_API_KEY}
   Body: { from, to, subject, html }
 
-To switch to SendGrid or Amazon SES, change the URL and body shape in the real-send block.
-The credential checked is ``settings.email_api_key``.
-Additional env vars for live mode (add to config.py):
-  EMAIL_FROM_ADDRESS — verified sender address (e.g. alerts@svault.example.com)
+The SMTP credentials checked are ``settings.smtp_host`` / ``smtp_port`` /
+``smtp_username`` / ``smtp_password`` / ``smtp_from`` / ``smtp_starttls``.
+The Resend credential checked is ``settings.email_api_key``.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import smtplib
+import ssl
 import uuid
+from email.message import EmailMessage
 
 import httpx
 
@@ -39,6 +39,39 @@ _DEFAULT_FROM = "sVault Alerts <alerts@svault.example.com>"
 _DEFAULT_SUBJECT = "Insurance Renewal Reminder — sVault"
 
 
+def _send_smtp_sync(recipient: str, subject: str, message: str) -> SendResult:
+    """Blocking SMTP send (run via asyncio.to_thread). STARTTLS (587) or SSL (465)."""
+    msg = EmailMessage()
+    msg["From"] = settings.smtp_from or settings.smtp_username
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg.set_content(message)
+    msg.add_alternative(
+        f"<p>{message}</p><hr/>"
+        f"<p style='font-size:12px;color:#888'>sVault — Corporate Insurance Portal</p>",
+        subtype="html",
+    )
+    ctx = ssl.create_default_context()
+    try:
+        if settings.smtp_starttls:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as s:
+                s.starttls(context=ctx)
+                if settings.smtp_username:
+                    s.login(settings.smtp_username, settings.smtp_password)
+                s.send_message(msg)
+        else:  # implicit SSL (typically port 465)
+            with smtplib.SMTP_SSL(
+                settings.smtp_host, settings.smtp_port, timeout=15, context=ctx
+            ) as s:
+                if settings.smtp_username:
+                    s.login(settings.smtp_username, settings.smtp_password)
+                s.send_message(msg)
+        return SendResult(status="sent", provider_msg_id=f"smtp-{uuid.uuid4().hex[:12]}")
+    except Exception as exc:  # smtplib raises a variety of exceptions
+        logger.warning("email smtp send failed | %s", exc)
+        return SendResult(status="failed", error=str(exc))
+
+
 async def send(
     recipient: str,
     message: str,
@@ -47,9 +80,14 @@ async def send(
 ) -> SendResult:
     """Send a transactional email to ``recipient`` (email address).
 
-    In simulated mode (no ``EMAIL_API_KEY`` set) logs intent and returns immediately.
-    In live mode sends via the Resend API.
+    Transport priority: **SMTP** (when ``SMTP_HOST`` set) → **Resend** HTTP API
+    (when ``EMAIL_API_KEY`` set) → **simulated** (logs intent, no real send).
     """
+    if settings.smtp_host:
+        return await asyncio.to_thread(
+            _send_smtp_sync, recipient, _DEFAULT_SUBJECT, message
+        )
+
     if not settings.email_api_key:
         logger.info(
             "email simulated | to=%s | message=%s",
@@ -61,7 +99,7 @@ async def send(
             provider_msg_id=f"sim-email-{uuid.uuid4().hex[:12]}",
         )
 
-    # --- real send ---
+    # --- real send (Resend HTTP) ---
     from_addr = getattr(settings, "email_from_address", _DEFAULT_FROM)
 
     # Build a minimal HTML body from the plain-text message.

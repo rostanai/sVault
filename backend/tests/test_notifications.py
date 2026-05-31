@@ -136,6 +136,7 @@ async def test_telegram_simulated_when_no_token():
 async def test_email_simulated_when_no_key():
     """Email adapter returns simulated and makes no HTTP call when api_key is absent."""
     with patch("app.services.notifications.email.settings") as mock_settings:
+        mock_settings.smtp_host = ""
         mock_settings.email_api_key = ""
         result = await email.send("owner@example.com", "Your policy expires soon")
     assert result.status == "simulated"
@@ -182,6 +183,7 @@ async def test_telegram_makes_no_http_call_in_simulated_mode():
 async def test_email_makes_no_http_call_in_simulated_mode():
     with patch("app.services.notifications.email.settings") as mock_settings, \
          patch("app.services.notifications.email.httpx.AsyncClient") as mock_client:
+        mock_settings.smtp_host = ""
         mock_settings.email_api_key = ""
         result = await email.send("owner@example.com", "message")
     mock_client.assert_not_called()

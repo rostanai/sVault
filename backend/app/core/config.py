@@ -48,7 +48,17 @@ class Settings(BaseSettings):
     whatsapp_token: str = ""
     sms_api_key: str = ""
     telegram_bot_token: str = ""
-    email_api_key: str = ""
+    email_api_key: str = ""  # Resend HTTP API (used only when SMTP_HOST is unset)
+
+    # Email — SMTP transport (preferred when set; falls back to Resend, then simulated).
+    # Configure these to send real notification/alert/digest emails via any SMTP server
+    # (Gmail, your host, Amazon SES SMTP, etc.). For Gmail use an App Password.
+    smtp_host: str = ""           # e.g. smtp.gmail.com
+    smtp_port: int = 587          # 587 = STARTTLS, 465 = SSL
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""           # From address, e.g. "sVault Alerts <alerts@yourco.com>"
+    smtp_starttls: bool = True    # STARTTLS on 587; set False for implicit SSL on 465
 
     # Razorpay (billing — M5). Empty = billing runs in "simulated" mode.
     razorpay_key_id: str = ""
