@@ -3,6 +3,8 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     alerts,
+    approvals,
+    ask,
     auth,
     billing,
     dashboard,
@@ -30,5 +32,5 @@ api_router.include_router(dashboard.router)     # M3
 api_router.include_router(billing.router)       # M5
 api_router.include_router(platform.router)      # M5
 
-# Later milestones add routers here:
-#   M6 approvals
+api_router.include_router(approvals.router)     # M6 approvals
+api_router.include_router(ask.router)           # AI "Ask sVault" (RAG)
