@@ -404,3 +404,45 @@ async def test_list_claims_no_tenant_returns_empty():
     result = await claim_service.list_claims(db_mock, user)
     assert result == []
     db_mock.execute.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# 5. Segregation of duties — only approver roles may adjudicate a claim
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_status", ["approved", "rejected", "settled"])
+async def test_owner_cannot_adjudicate_own_claim(db, bad_status: str):
+    """An owner must NOT be able to approve/reject/settle their own claim (SoD)."""
+    with pytest.raises(AppError) as exc_info:
+        await claim_service.update(db, owner_a, CLAIM_A, ClaimUpdate(status=bad_status))
+    assert exc_info.value.code.value == "forbidden"
+
+
+@pytest.mark.asyncio
+async def test_owner_cannot_set_approved_amount(db):
+    """An owner must NOT be able to set the approved payout amount (SoD)."""
+    with pytest.raises(AppError) as exc_info:
+        await claim_service.update(
+            db, owner_a, CLAIM_A, ClaimUpdate(approved_amount_inr=50000)
+        )
+    assert exc_info.value.code.value == "forbidden"
+
+
+@pytest.mark.asyncio
+async def test_owner_can_still_progress_non_adjudication_status(db):
+    """SoD must not block ordinary owner updates (e.g. reported → under_review)."""
+    result = await claim_service.update(
+        db, owner_a, CLAIM_A, ClaimUpdate(status="under_review")
+    )
+    assert result.status == "under_review"
+
+
+@pytest.mark.asyncio
+async def test_manager_can_approve_and_set_amount(db):
+    """A manager (approver) may approve a claim and set the approved amount."""
+    result = await claim_service.update(
+        db, manager, CLAIM_A,
+        ClaimUpdate(status="approved", approved_amount_inr=75000, note="Approved"),
+    )
+    assert result.status == "approved"

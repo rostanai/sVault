@@ -27,7 +27,8 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import not_found
+from app.core.authz import has_permission
+from app.core.errors import AppError, ErrorCode, not_found
 from app.core.security import CurrentUser
 from app.db.models.claims import Claim, ClaimEvent
 from app.db.models.insurance import Policy
@@ -37,6 +38,10 @@ from app.services.policy_service import (
     _accessible_org_filter,
     _owner_filter,
 )
+
+# Claim statuses that constitute "adjudication" (approving/closing out a claim) and
+# are therefore restricted to approver roles (admin/manager) — segregation of duties.
+_ADJUDICATION_STATUSES = {"approved", "rejected", "settled"}
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -217,6 +222,23 @@ async def update(
     claim, policy_title = await _load_claim_scoped(db, user, claim_id)
 
     updates = payload.model_dump(exclude_unset=True, exclude={"note"})
+
+    # Segregation of duties: adjudicating a claim — moving it to approved/rejected/
+    # settled, or setting the approved payout amount — is reserved for approver roles
+    # (admin/manager via approval:approve). An owner may file and update a claim but
+    # may not approve/settle their own claim or set its payout. (claim filing/editing
+    # itself is already gated at the endpoint by policy:update.)
+    wants_adjudication = (
+        updates.get("status") in _ADJUDICATION_STATUSES
+        or "approved_amount_inr" in updates
+    )
+    if wants_adjudication and not has_permission(user, "approval:approve"):
+        raise AppError(
+            ErrorCode.forbidden,
+            "Only an approver can approve, reject, settle, or set the approved "
+            "amount of a claim.",
+        )
+
     old_status = claim.status
 
     for field, value in updates.items():

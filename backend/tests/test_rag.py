@@ -18,7 +18,7 @@ import uuid
 import httpx
 import pytest
 
-from app.core.errors import AppError
+from app.core.errors import AppError, ErrorCode
 from app.core.security import CurrentUser
 from app.main import app
 from app.services import rag_service
@@ -125,3 +125,39 @@ async def test_ai_endpoints_require_auth(path):
         resp = await ac.post(path, json={"question": "what is my fleet cover?"})
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "unauthorized"
+
+
+# ---------------------------------------------------------------------------
+# 5. ingest_document enforces object-level policy scope (BOLA fix)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ingest_document_404_when_missing():
+    """ingest_document must 404 when the document row does not exist."""
+    from unittest.mock import AsyncMock
+
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=None)
+    with pytest.raises(AppError) as ei:
+        await rag_service.ingest_document(db, _user(), uuid.uuid4())
+    assert ei.value.code.value == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_ingest_document_enforces_policy_scope():
+    """A document whose policy is not accessible to the caller must 404 — closes the
+    BOLA where a same-tenant user passed an accessible policy_id + a foreign doc_id."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    doc = MagicMock()
+    doc.policy_id = uuid.uuid4()
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=doc)
+    # policy_service.get_policy is the scope gate; simulate "not yours" → 404.
+    with patch(
+        "app.services.policy_service.get_policy",
+        new=AsyncMock(side_effect=AppError(ErrorCode.not_found, "Policy not found")),
+    ):
+        with pytest.raises(AppError) as ei:
+            await rag_service.ingest_document(db, _user(), uuid.uuid4())
+    assert ei.value.code.value == "not_found"
