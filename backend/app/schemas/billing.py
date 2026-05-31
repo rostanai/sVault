@@ -136,3 +136,31 @@ class TenantRead(BaseModel):
     name: str
     status: str
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Platform analytics
+# ---------------------------------------------------------------------------
+
+class TenantCounts(BaseModel):
+    """Breakdown of tenant counts by status."""
+
+    total: int
+    active: int
+    suspended: int
+
+
+class TierCount(BaseModel):
+    """Count of active subscriptions per plan tier."""
+
+    tier: str
+    count: int
+
+
+class PlatformAnalytics(BaseModel):
+    """Platform-wide metrics for the Super Admin overview dashboard."""
+
+    tenants: TenantCounts
+    subscriptions: dict[str, int]
+    by_tier: list[TierCount]
+    mrr_inr: str  # sum of price_inr over active subscriptions, as a numeric string

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AppShell from "@/components/app-shell";
-import { getSubscription, getPlans } from "@/lib/api";
+import { getSubscription, getPlans, getMe } from "@/lib/api";
 
 export default async function AppLayout({
   children,
@@ -24,11 +24,12 @@ export default async function AppLayout({
     "User";
   const avatarUrl = user.user_metadata?.avatar_url as string | undefined;
 
-  // Best-effort: fetch subscription + plans server-side.
-  // A billing error must never block the app shell from rendering.
+  // Best-effort: fetch subscription + plans + super-admin flag server-side.
+  // Any error must never block the app shell from rendering.
   let planName: string = "Free";
   let subscriptionStatus: string = "free";
   let trialDaysLeft: number | null = null;
+  let isSuperAdmin: boolean = false;
 
   try {
     const {
@@ -37,10 +38,15 @@ export default async function AppLayout({
 
     if (session?.access_token) {
       const token = session.access_token;
-      const [subData, plans] = await Promise.all([
+      const [subData, plans, meData] = await Promise.all([
         getSubscription(token),
         getPlans(token),
+        getMe(token).catch(() => null),
       ]);
+
+      if (meData?.is_super_admin) {
+        isSuperAdmin = true;
+      }
 
       const sub = subData?.subscription;
       if (sub) {
@@ -74,6 +80,7 @@ export default async function AppLayout({
       planName={planName}
       subscriptionStatus={subscriptionStatus}
       trialDaysLeft={trialDaysLeft}
+      isSuperAdmin={isSuperAdmin}
     >
       {children}
     </AppShell>

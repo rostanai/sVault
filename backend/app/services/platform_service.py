@@ -17,15 +17,16 @@ from __future__ import annotations
 
 import logging
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import secrets_store
 from app.core.errors import not_found
-from app.db.models.billing import Plan, PlatformAuditLog, PlatformSetting
+from app.db.models.billing import Plan, PlatformAuditLog, PlatformSetting, Subscription
 from app.db.models.tenancy import Tenant
-from app.schemas.billing import PlanCreate, PlanUpdate
+from app.schemas.billing import PlanCreate, PlanUpdate, PlatformAnalytics, TenantCounts, TierCount
 
 log = logging.getLogger("svault.platform")
 
@@ -256,3 +257,58 @@ async def activate_tenant(
     await db.commit()
     await db.refresh(t)
     return t
+
+
+# ---------------------------------------------------------------------------
+# Platform analytics
+# ---------------------------------------------------------------------------
+
+async def get_analytics(db: AsyncSession) -> PlatformAnalytics:
+    """Return platform-wide metrics: tenant counts, subscription status breakdown,
+    active subscriptions by plan tier, and monthly recurring revenue.
+
+    Uses aggregate SQL (func.count / func.sum + group_by) — no Python loops over rows.
+    """
+    # --- tenant counts (total / active / suspended) ---
+    tenant_counts_stmt = select(
+        func.count().label("total"),
+        func.count(Tenant.id).filter(Tenant.status == "active").label("active"),
+        func.count(Tenant.id).filter(Tenant.status == "suspended").label("suspended"),
+    )
+    row = (await db.execute(tenant_counts_stmt)).one()
+    tenants = TenantCounts(total=row.total, active=row.active, suspended=row.suspended)
+
+    # --- subscription status breakdown ---
+    sub_status_stmt = (
+        select(Subscription.status, func.count().label("cnt"))
+        .group_by(Subscription.status)
+    )
+    sub_rows = (await db.execute(sub_status_stmt)).all()
+    subscriptions: dict[str, int] = {r.status: r.cnt for r in sub_rows}
+
+    # --- active subscriptions grouped by plan tier ---
+    tier_stmt = (
+        select(Plan.tier, func.count().label("cnt"))
+        .join(Plan, Subscription.plan_id == Plan.id)
+        .where(Subscription.status == "active")
+        .group_by(Plan.tier)
+        .order_by(Plan.tier)
+    )
+    tier_rows = (await db.execute(tier_stmt)).all()
+    by_tier = [TierCount(tier=r.tier, count=r.cnt) for r in tier_rows]
+
+    # --- MRR: sum of plan.price_inr over active subscriptions ---
+    mrr_stmt = (
+        select(func.coalesce(func.sum(Plan.price_inr), 0).label("mrr"))
+        .join(Plan, Subscription.plan_id == Plan.id)
+        .where(Subscription.status == "active")
+    )
+    mrr_row = (await db.execute(mrr_stmt)).one()
+    mrr_inr = str(mrr_row.mrr or Decimal(0))
+
+    return PlatformAnalytics(
+        tenants=tenants,
+        subscriptions=subscriptions,
+        by_tier=by_tier,
+        mrr_inr=mrr_inr,
+    )
