@@ -4,8 +4,10 @@ import { useEffect, useState, useCallback } from "react";
 import {
   getRenewalReport,
   exportRenewalReport,
+  downloadCalendar,
   type RenewalReportRow,
 } from "@/lib/api";
+import { toast } from "sonner";
 import {
   formatDate,
   formatINR,
@@ -31,6 +33,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Loader2,
+  CalendarPlus,
 } from "lucide-react";
 
 // ── Window selector options ───────────────────────────────────────────────────
@@ -59,6 +62,7 @@ export default function ReportsClient({ token }: Props) {
   // Export loading states
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [downloadingCal, setDownloadingCal] = useState(false);
 
   const fetchReport = useCallback(() => {
     if (!token) return;
@@ -75,6 +79,21 @@ export default function ReportsClient({ token }: Props) {
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
+
+  async function handleDownloadCalendar() {
+    setDownloadingCal(true);
+    try {
+      await downloadCalendar(token);
+      toast.success("Calendar downloaded.", {
+        description:
+          "Import svault-renewals.ics into Google Calendar or Outlook to see every renewal date.",
+      });
+    } catch {
+      // downloadAuthed already shows a toast on failure — nothing more to do
+    } finally {
+      setDownloadingCal(false);
+    }
+  }
 
   async function handleExport(format: "csv" | "xlsx") {
     const setSaving = format === "csv" ? setExportingCsv : setExportingXlsx;
@@ -136,6 +155,20 @@ export default function ReportsClient({ token }: Props) {
               <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />
             )}
             Export Excel
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleDownloadCalendar}
+            disabled={downloadingCal}
+            aria-label="Add policy renewal dates to calendar"
+          >
+            {downloadingCal ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <CalendarPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            )}
+            Add to calendar
           </Button>
         </div>
       </div>
