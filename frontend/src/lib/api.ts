@@ -730,7 +730,7 @@ export async function extractPolicyFromDocument(
   return res.json() as Promise<PolicyExtraction>;
 }
 
-// ── Developer API keys ─────────────────────────────────────────────
+// ── Developer API keys ──────────────────────────────────────────────────────
 
 export interface ApiKeyRead {
   id: string;
@@ -768,7 +768,7 @@ export const revokeApiKey = (token: string, keyId: string) =>
     silent: true,
   });
 
-// ── Super Admin / Platform (super_admin only) ───────────────────────────────
+// ── Super Admin / Platform (super_admin only) ────────────────────────────────────
 
 export interface PlatformTenant {
   id: string;
@@ -975,7 +975,7 @@ export async function importPolicies(
   return res.json() as Promise<ImportResult>;
 }
 
-// ── Alert actions (snooze / mark renewed) ────────────────────────────────
+// ── Alert actions (snooze / mark renewed) ───────────────────────────────────────
 
 export const snoozeAlert = (token: string, alertId: string, days: number) =>
   apiFetch<{ id: string; status: string; scheduled_for: string }>(
