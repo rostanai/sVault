@@ -85,6 +85,7 @@ class PolicyRead(BaseModel):
     renewal_date: date | None
     status: str
     prev_policy_id: uuid.UUID | None = None
+    custom_fields: dict = {}
     created_at: datetime
 
 
