@@ -33,7 +33,7 @@ import {
   Loader2,
 } from "lucide-react";
 
-// ── Window selector options ──────────────────────────────────────────────────────────
+// ── Window selector options ───────────────────────────────────────────────────
 
 const WINDOW_OPTIONS: { value: number; label: string }[] = [
   { value: 30, label: "30 days" },
@@ -42,13 +42,13 @@ const WINDOW_OPTIONS: { value: number; label: string }[] = [
   { value: 180, label: "180 days" },
 ];
 
-// ── Props ────────────────────────────────────────────────────────────────────────────
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   token: string;
 }
 
-// ── Main component ───────────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export default function ReportsClient({ token }: Props) {
   const [rows, setRows] = useState<RenewalReportRow[]>([]);
@@ -259,7 +259,7 @@ export default function ReportsClient({ token }: Props) {
   );
 }
 
-// ── Status badge variant ─────────────────────────────────────────────────────────
+// ── Status badge variant ──────────────────────────────────────────────────────
 
 function statusVariant(
   s: string
@@ -270,7 +270,7 @@ function statusVariant(
   return "secondary";
 }
 
-// ── Skeleton ───────────────────────────────────────────────────────────────────────────────
+// ── Skeleton ──────────────────────────────────────────────────────────────────
 
 function TableSkeleton() {
   return (
@@ -284,7 +284,7 @@ function TableSkeleton() {
   );
 }
 
-// ── Empty state ──────────────────────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────
 
 function EmptyState({ windowDays }: { windowDays: number }) {
   return (
@@ -298,7 +298,7 @@ function EmptyState({ windowDays }: { windowDays: number }) {
   );
 }
 
-// ── Error state ──────────────────────────────────────────────────────────────────────
+// ── Error state ───────────────────────────────────────────────────────────────
 
 function ErrorState({
   message,
