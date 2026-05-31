@@ -673,7 +673,7 @@ export const setAlertRule = (
     token,
   });
 
-// ── AI Policy Intake (auto-extract from a document) ──────────────────────────
+// ── AI Policy Intake (auto-extract from a document) ────────────────────────────
 
 export interface PolicyExtraction {
   category: PolicyCategory | null;
@@ -730,7 +730,7 @@ export async function extractPolicyFromDocument(
   return res.json() as Promise<PolicyExtraction>;
 }
 
-// ── Developer API keys ──────────────────────────────────────────────
+// ── Developer API keys ───────────────────────────────────────
 
 export interface ApiKeyRead {
   id: string;
@@ -768,7 +768,7 @@ export const revokeApiKey = (token: string, keyId: string) =>
     silent: true,
   });
 
-// ── Super Admin / Platform (super_admin only) ───────────────────────────────────
+// ── Super Admin / Platform (super_admin only) ───────────────────────────────
 
 export interface PlatformTenant {
   id: string;
@@ -862,3 +862,130 @@ export const adminSetSetting = (
 // Platform analytics (overview)
 export const adminGetAnalytics = (token: string) =>
   apiFetch<PlatformAnalytics>("/platform/analytics", { token });
+
+// ── Reports + Excel import/export ──────────────────────────────────────
+
+export interface RenewalReportRow {
+  policy_id: string;
+  title: string;
+  category: string;
+  provider_name: string | null;
+  expiry_date: string | null;
+  days_left: number | null;
+  premium_inr: string | null;
+  sum_insured_inr: string | null;
+  status: string;
+}
+
+export interface ImportResult {
+  created: number;
+  skipped: number;
+  errors: { row: number; message: string }[];
+}
+
+/** Renewal report rows (policies in a forward expiry window). */
+export const getRenewalReport = (
+  token: string,
+  params?: { window_days?: number }
+) => {
+  const qs = new URLSearchParams();
+  if (params?.window_days != null) qs.set("window_days", String(params.window_days));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<RenewalReportRow[]>(`/reports/renewals${query}`, { token });
+};
+
+/** Fetch an authed file (CSV/XLSX) and trigger a browser download. */
+export async function downloadAuthed(
+  token: string,
+  path: string,
+  fallbackName: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let message = "Download failed";
+    try {
+      const body = await res.json();
+      message = body?.error?.message ?? message;
+    } catch {
+      /* binary/empty body */
+    }
+    toast.error(message);
+    throw new AppError("internal_error", message);
+  }
+  const cd = res.headers.get("content-disposition") ?? "";
+  const match = cd.match(/filename="?([^";]+)"?/);
+  const filename = match?.[1] ?? fallbackName;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Export all policies as CSV or XLSX (triggers download). */
+export const exportPolicies = (token: string, format: "csv" | "xlsx") =>
+  downloadAuthed(token, `/policies/export?format=${format}`, `policies.${format}`);
+
+/** Export the renewal report as CSV or XLSX (triggers download). */
+export const exportRenewalReport = (
+  token: string,
+  format: "csv" | "xlsx",
+  windowDays?: number
+) =>
+  downloadAuthed(
+    token,
+    `/reports/renewals/export?format=${format}${windowDays != null ? `&window_days=${windowDays}` : ""}`,
+    `renewals.${format}`
+  );
+
+/** Bulk-import policies from an .xlsx/.csv file (multipart). */
+export async function importPolicies(
+  token: string,
+  file: File
+): Promise<ImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/policies/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let code = "internal_error";
+    let message = "Import failed";
+    try {
+      const body = await res.json();
+      code = body?.error?.code ?? code;
+      message = body?.error?.message ?? message;
+    } catch {
+      /* non-JSON */
+    }
+    toast.error(message);
+    throw new AppError(code, message);
+  }
+  return res.json() as Promise<ImportResult>;
+}
+
+// ── Alert actions (snooze / mark renewed) ────────────────────────────────
+
+export const snoozeAlert = (token: string, alertId: string, days: number) =>
+  apiFetch<{ id: string; status: string; scheduled_for: string }>(
+    `/alerts/${alertId}/snooze`,
+    { method: "POST", body: JSON.stringify({ days }), token }
+  );
+
+/** Mark a policy renewed (sets status=renewed, cancels its pending alerts). */
+export const markPolicyRenewed = (token: string, policyId: string) =>
+  apiFetch<PolicyRead>(`/policies/${policyId}/mark-renewed`, {
+    method: "POST",
+    token,
+  });
