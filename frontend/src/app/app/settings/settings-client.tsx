@@ -107,7 +107,7 @@ export default function SettingsClient({ token, currentUserRole }: Props) {
   if (error) return <ErrorState message={error} />;
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-8 max-w-4xl mx-auto">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Team</h2>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -217,8 +217,7 @@ export default function SettingsClient({ token, currentUserRole }: Props) {
   );
 }
 
-// ── UserRow ────────────────────────────────────────────────────────────────────
-
+// ── UserRow ───────────────────────────────────────────────
 function UserRow({
   user,
   isAdmin,
@@ -321,8 +320,7 @@ function UserRow({
   );
 }
 
-// ── InviteDialog ───────────────────────────────────────────────────────────────
-
+// ── InviteDialog ──────────────────────────────────────────
 function InviteDialog({
   token,
   onInvited,
@@ -494,8 +492,7 @@ function InviteDialog({
   );
 }
 
-// ── YourDataCard ───────────────────────────────────────────────────────────────
-
+// ── YourDataCard ──────────────────────────────────────────
 interface DigestResult {
   sent: boolean;
   recipient: string | null;
@@ -623,8 +620,7 @@ function YourDataCard({ token }: { token: string }) {
   );
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
+// ── Helpers ──────────────────────────────────────────────
 function RoleBadge({ role }: { role: string }) {
   const v: Record<string, "default" | "secondary" | "warning" | "success"> = {
     admin: "default",
@@ -641,7 +637,7 @@ function RoleBadge({ role }: { role: string }) {
 
 function TeamSkeleton() {
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-8 max-w-4xl mx-auto">
       <div className="space-y-1">
         <Skeleton className="h-8 w-24" />
         <Skeleton className="h-4 w-56" />
