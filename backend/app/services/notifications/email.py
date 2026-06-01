@@ -15,7 +15,8 @@ Resend HTTP fallback shape
   Body: { from, to, subject, html }
 
 The SMTP credentials checked are ``settings.smtp_host`` / ``smtp_port`` /
-``smtp_username`` / ``smtp_password`` / ``smtp_from`` / ``smtp_starttls``.
+``smtp_username`` / ``smtp_password`` / ``smtp_from`` / ``smtp_starttls`` — each may
+also be overridden at runtime from the platform_settings table (Super-Admin console).
 The Resend credential checked is ``settings.email_api_key``.
 """
 from __future__ import annotations
@@ -39,10 +40,57 @@ _DEFAULT_FROM = "sVault Alerts <alerts@svault.example.com>"
 _DEFAULT_SUBJECT = "Insurance Renewal Reminder — sVault"
 
 
-def _send_smtp_sync(recipient: str, subject: str, message: str) -> SendResult:
+async def _resolve_smtp_cfg() -> dict:
+    """Resolve SMTP config from platform_settings (Super-Admin console) → env fallback.
+
+    Lets the SMTP host/credentials be configured at runtime without a redeploy
+    (mirrors how the AI/Razorpay keys are resolved). Opens a short-lived DB session
+    so callers of ``send()`` don't need to be database-aware. Degrades to the process
+    env (``settings.smtp_*``) on any DB hiccup.
+    """
+    cfg = {
+        "host": settings.smtp_host,
+        "port": settings.smtp_port,
+        "username": settings.smtp_username,
+        "password": settings.smtp_password,
+        "from": settings.smtp_from,
+        "starttls": settings.smtp_starttls,
+    }
+    try:
+        from app.db.session import _SessionLocal
+        from app.services import secrets_service
+
+        if _SessionLocal is None:
+            return cfg
+        async with _SessionLocal() as db:
+            host = await secrets_service.get_secret(db, "smtp_host", settings.smtp_host)
+            if not host:
+                return cfg
+            cfg["host"] = host
+            port_raw = await secrets_service.get_secret(db, "smtp_port", str(settings.smtp_port))
+            try:
+                cfg["port"] = int(port_raw)
+            except (TypeError, ValueError):
+                cfg["port"] = settings.smtp_port
+            cfg["username"] = await secrets_service.get_secret(
+                db, "smtp_username", settings.smtp_username
+            )
+            cfg["password"] = await secrets_service.get_secret(
+                db, "smtp_password", settings.smtp_password
+            )
+            cfg["from"] = await secrets_service.get_secret(db, "smtp_from", settings.smtp_from)
+            starttls_raw = await secrets_service.get_secret(db, "smtp_starttls", "")
+            if starttls_raw:
+                cfg["starttls"] = starttls_raw.strip().lower() in ("1", "true", "yes", "on")
+    except Exception as exc:  # pragma: no cover - DB hiccup must not break email
+        logger.warning("smtp config resolve failed, using env | %s", exc)
+    return cfg
+
+
+def _send_smtp_sync(cfg: dict, recipient: str, subject: str, message: str) -> SendResult:
     """Blocking SMTP send (run via asyncio.to_thread). STARTTLS (587) or SSL (465)."""
     msg = EmailMessage()
-    msg["From"] = settings.smtp_from or settings.smtp_username
+    msg["From"] = cfg.get("from") or cfg.get("username")
     msg["To"] = recipient
     msg["Subject"] = subject
     msg.set_content(message)
@@ -52,19 +100,19 @@ def _send_smtp_sync(recipient: str, subject: str, message: str) -> SendResult:
         subtype="html",
     )
     ctx = ssl.create_default_context()
+    host, port = cfg["host"], cfg["port"]
+    username, password = cfg.get("username"), cfg.get("password")
     try:
-        if settings.smtp_starttls:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as s:
+        if cfg.get("starttls", True):
+            with smtplib.SMTP(host, port, timeout=15) as s:
                 s.starttls(context=ctx)
-                if settings.smtp_username:
-                    s.login(settings.smtp_username, settings.smtp_password)
+                if username:
+                    s.login(username, password)
                 s.send_message(msg)
         else:  # implicit SSL (typically port 465)
-            with smtplib.SMTP_SSL(
-                settings.smtp_host, settings.smtp_port, timeout=15, context=ctx
-            ) as s:
-                if settings.smtp_username:
-                    s.login(settings.smtp_username, settings.smtp_password)
+            with smtplib.SMTP_SSL(host, port, timeout=15, context=ctx) as s:
+                if username:
+                    s.login(username, password)
                 s.send_message(msg)
         return SendResult(status="sent", provider_msg_id=f"smtp-{uuid.uuid4().hex[:12]}")
     except Exception as exc:  # smtplib raises a variety of exceptions
@@ -83,9 +131,10 @@ async def send(
     Transport priority: **SMTP** (when ``SMTP_HOST`` set) → **Resend** HTTP API
     (when ``EMAIL_API_KEY`` set) → **simulated** (logs intent, no real send).
     """
-    if settings.smtp_host:
+    cfg = await _resolve_smtp_cfg()
+    if cfg["host"]:
         return await asyncio.to_thread(
-            _send_smtp_sync, recipient, _DEFAULT_SUBJECT, message
+            _send_smtp_sync, cfg, recipient, _DEFAULT_SUBJECT, message
         )
 
     if not settings.email_api_key:

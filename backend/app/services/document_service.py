@@ -73,14 +73,19 @@ async def list_documents(
     ).scalars().all()
     # Sign all download URLs concurrently (one storage round-trip each) rather than
     # serially — N sequential calls collapse into one parallel batch.
+    # return_exceptions=True so a single un-signable object (missing file in the
+    # bucket, transient storage error) yields an empty URL instead of 502-ing the
+    # whole list. Mirrors document_library_service.
     urls = await asyncio.gather(
-        *(storage.create_signed_download_url(d.storage_path) for d in rows)
+        *(storage.create_signed_download_url(d.storage_path) for d in rows),
+        return_exceptions=True,
     )
     return [
         {
             "id": d.id, "file_name": d.file_name, "doc_type": d.doc_type,
             "mime_type": d.mime_type, "size_bytes": d.size_bytes, "version": d.version,
-            "created_at": d.created_at, "download_url": url,
+            "created_at": d.created_at,
+            "download_url": "" if isinstance(url, BaseException) else url,
         }
         for d, url in zip(rows, urls, strict=True)
     ]
