@@ -328,6 +328,12 @@ export const createPolicy = (token: string, body: PolicyCreate) =>
     token,
   });
 
+export const deletePolicy = (token: string, policyId: string) =>
+  apiFetch<void>(`/policies/${policyId}`, {
+    method: "DELETE",
+    token,
+  });
+
 export const getPlans = (token: string) =>
   apiFetch<PlanRead[]>("/plans", { token });
 
@@ -688,8 +694,7 @@ export const setAlertRule = (
     token,
   });
 
-// ── AI Policy Intake (auto-extract from a document) ──────────────────────────
-
+// ── AI Policy Intake (auto-extract from a document) ────────────────────────────
 export interface PolicyExtraction {
   category: PolicyCategory | null;
   title: string | null;
@@ -745,8 +750,7 @@ export async function extractPolicyFromDocument(
   return res.json() as Promise<PolicyExtraction>;
 }
 
-// ── Developer API keys ──────────────────────────────────────────────
-
+// ── Developer API keys ───────────────────────────────
 export interface ApiKeyRead {
   id: string;
   name: string;
@@ -783,8 +787,7 @@ export const revokeApiKey = (token: string, keyId: string) =>
     silent: true,
   });
 
-// ── Super Admin / Platform (super_admin only) ───────────────────────────────────
-
+// ── Super Admin / Platform (super_admin only) ───────────────────────────────
 export interface PlatformTenant {
   id: string;
   name: string;
@@ -878,8 +881,7 @@ export const adminSetSetting = (
 export const adminGetAnalytics = (token: string) =>
   apiFetch<PlatformAnalytics>("/platform/analytics", { token });
 
-// ── Reports + Excel import/export ───────────────────────────────────────────────
-
+// ── Reports + Excel import/export ─────────────────────────────────
 export interface RenewalReportRow {
   policy_id: string;
   title: string;
@@ -990,8 +992,7 @@ export async function importPolicies(
   return res.json() as Promise<ImportResult>;
 }
 
-// ── Alert actions (snooze / mark renewed) ───────────────────────────────────────
-
+// ── Alert actions (snooze / mark renewed) ──────────────────────────────
 export const snoozeAlert = (token: string, alertId: string, days: number) =>
   apiFetch<{ id: string; status: string; scheduled_for: string }>(
     `/alerts/${alertId}/snooze`,
@@ -1005,8 +1006,7 @@ export const markPolicyRenewed = (token: string, policyId: string) =>
     token,
   });
 
-// ── Document library (all documents across policies) ────────────────────────────
-
+// ── Document library (all documents across policies) ────────────────────────
 export interface DocumentLibraryItem {
   id: string;
   file_name: string;
@@ -1034,8 +1034,7 @@ export const getAllDocuments = (
   return apiFetch<DocumentLibraryItem[]>(`/documents${query}`, { token });
 };
 
-// ── Notifications (in-app bell) ─────────────────────────────────────────────────
-
+// ── Notifications (in-app bell) ───────────────────────────────────
 export interface NotificationItem {
   id: string;
   type: string; // "alert" | "approval"
@@ -1053,8 +1052,7 @@ export interface NotificationFeed {
 export const getNotifications = (token: string) =>
   apiFetch<NotificationFeed>("/notifications", { token, silent: true });
 
-// ── Subscription lifecycle (cancel / pause / resume) ────────────────────────────
-
+// ── Subscription lifecycle (cancel / pause / resume) ────────────────────────
 export const cancelSubscription = (token: string) =>
   apiFetch<SubscriptionRead>("/billing/cancel", { method: "POST", token });
 
@@ -1064,8 +1062,7 @@ export const pauseSubscription = (token: string) =>
 export const resumeSubscription = (token: string) =>
   apiFetch<SubscriptionRead>("/billing/resume", { method: "POST", token });
 
-// ── Policy renewal (creates next-year linked policy) ────────────────────────────
-
+// ── Policy renewal (creates next-year linked policy) ────────────────────────
 export interface RenewPolicyRequest {
   expiry_date: string; // new term expiry (YYYY-MM-DD)
   renewal_date?: string;
@@ -1088,8 +1085,7 @@ export const renewPolicy = (
     token,
   });
 
-// ── Outbound webhooks (developer integration) ───────────────────────────────────
-
+// ── Outbound webhooks (developer integration) ──────────────────────────────
 export interface WebhookRead {
   id: string;
   url: string;
@@ -1130,8 +1126,7 @@ export const testWebhook = (token: string, webhookId: string) =>
     { method: "POST", token }
   );
 
-// ── Plan usage / limits (metering + gating) ─────────────────────────────────────
-
+// ── Plan usage / limits (metering + gating) ──────────────────────────────
 export interface UsageMetric {
   used: number;
   limit: number; // -1 = unlimited
@@ -1146,8 +1141,7 @@ export interface UsageResponse {
 export const getUsage = (token: string) =>
   apiFetch<UsageResponse>("/billing/usage", { token });
 
-// ── Onboarding status (first-run checklist) ─────────────────────────────────────
-
+// ── Onboarding status (first-run checklist) ──────────────────────────────
 export interface OnboardingStep {
   key: string;
   label: string;
@@ -1166,8 +1160,7 @@ export interface OnboardingStatus {
 export const getOnboardingStatus = (token: string) =>
   apiFetch<OnboardingStatus>("/onboarding/status", { token, silent: true });
 
-// ── Notification history (full feed page) ───────────────────────────────────────
-
+// ── Notification history (full feed page) ──────────────────────────────
 export const getNotificationHistory = (
   token: string,
   params?: { limit?: number; offset?: number }
@@ -1179,14 +1172,12 @@ export const getNotificationHistory = (
   return apiFetch<NotificationItem[]>(`/notifications/history${query}`, { token });
 };
 
-// ── Calendar (.ics) — renewal/expiry feed ───────────────────────────────────────
-
+// ── Calendar (.ics) — renewal/expiry feed ──────────────────────────────
 /** Download an iCalendar (.ics) file of all policy expiry/renewal dates. */
 export const downloadCalendar = (token: string) =>
   downloadAuthed(token, "/calendar.ics", "svault-renewals.ics");
 
-// ── Provider detail + contact log ───────────────────────────────────────────────
-
+// ── Provider detail + contact log ───────────────────────────────────
 export interface ProviderUpdate {
   name?: string;
   contact_name?: string | null;
@@ -1248,8 +1239,7 @@ export const deleteProviderContact = (token: string, contactId: string) =>
     silent: true,
   });
 
-// ── Policy installments / payment tracking ──────────────────────────────────────
-
+// ── Policy installments / payment tracking ──────────────────────────────
 export interface Installment {
   id: string;
   policy_id: string;
@@ -1295,7 +1285,6 @@ export const deleteInstallment = (token: string, installmentId: string) =>
   });
 
 // ── Consolidated group dashboard (parent rolls up subsidiaries) ─────────────────
-
 export interface OrgRollup {
   org_id: string;
   org_name: string;
@@ -1313,8 +1302,7 @@ export interface GroupDashboardResponse {
 export const getGroupDashboard = (token: string) =>
   apiFetch<GroupDashboardResponse>("/dashboard/group", { token });
 
-// ── Policy edit (standard fields + custom fields) ───────────────────────────────
-
+// ── Policy edit (standard fields + custom fields) ────────────────────────
 export const updatePolicy = (
   token: string,
   policyId: string,
@@ -1326,14 +1314,12 @@ export const updatePolicy = (
     token,
   });
 
-// ── DPDP / account data export ──────────────────────────────────────────────────
-
+// ── DPDP / account data export ─────────────────────────────────────
 /** Download a JSON export of all the tenant's data (DPDP data-principal request). */
 export const downloadDataExport = (token: string) =>
   downloadAuthed(token, "/account/export", "svault-data-export.json");
 
-// ── Weekly renewal digest (send now) ────────────────────────────────────────────
-
+// ── Weekly renewal digest (send now) ───────────────────────────────────
 /** Send the current weekly renewal digest email to the caller (test/on-demand). */
 export const sendDigestNow = (token: string) =>
   apiFetch<{ sent: boolean; recipient: string | null; policies: number }>(
@@ -1341,8 +1327,7 @@ export const sendDigestNow = (token: string) =>
     { method: "POST", token }
   );
 
-// ── Claims ──────────────────────────────────────────────────────────────────────
-
+// ── Claims ───────────────────────────────────────────────────
 export type ClaimStatus =
   | "draft"
   | "reported"
