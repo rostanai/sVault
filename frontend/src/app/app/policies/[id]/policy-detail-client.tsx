@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   getPolicy,
+  deletePolicy,
   listDocuments,
   getDocumentUploadUrl,
   uploadFileToStorage,
@@ -138,6 +139,8 @@ export default function PolicyDetailClient({ id, token }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [renewConfirmOpen, setRenewConfirmOpen] = useState(false);
   const [markingRenewed, setMarkingRenewed] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingPolicy, setDeletingPolicy] = useState(false);
 
   // Renew-policy dialog state
   const [renewDialogOpen, setRenewDialogOpen] = useState(false);
@@ -181,6 +184,19 @@ export default function PolicyDetailClient({ id, token }: Props) {
       // apiFetch already toasted
     } finally {
       setMarkingRenewed(false);
+    }
+  }
+
+  async function handleDeletePolicy() {
+    setDeletingPolicy(true);
+    try {
+      await deletePolicy(token, id);
+      toast.success("Policy deleted.");
+      router.push("/app/policies");
+    } catch {
+      // apiFetch already toasted (403 if the role can't delete, etc.)
+      setDeletingPolicy(false);
+      setDeleteConfirmOpen(false);
     }
   }
 
@@ -372,6 +388,17 @@ export default function PolicyDetailClient({ id, token }: Props) {
                 </Button>
               </>
             )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={deletingPolicy}
+              aria-label="Delete this policy"
+              className="h-7 px-2.5 text-xs text-red-600 border-red-600/40 hover:bg-red-600/10 dark:text-red-400 dark:border-red-600/40 dark:hover:bg-red-600/10"
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" />
+              Delete
+            </Button>
           </div>
           {daysLeft != null && (
             <Badge variant={daysLeftVariant(daysLeft)} className="text-xs">
@@ -417,6 +444,47 @@ export default function PolicyDetailClient({ id, token }: Props) {
                 <>
                   <CheckCircle className="mr-1.5 h-4 w-4" />
                   Confirm
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete policy confirm dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete this policy?</DialogTitle>
+            <DialogDescription>
+              This permanently removes &ldquo;{policy.title}&rdquo; along with its
+              documents, installments and alerts. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={deletingPolicy}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleDeletePolicy}
+              disabled={deletingPolicy}
+              className="bg-red-600 hover:bg-red-600/90 text-white"
+            >
+              {deletingPolicy ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  Delete policy
                 </>
               )}
             </Button>
@@ -857,13 +925,7 @@ export default function PolicyDetailClient({ id, token }: Props) {
   );
 }
 
-// ── Custom Fields card ────────────────────────────────────────────────────────
-
-interface CustomFieldRow {
-  key: string;
-  value: string;
-}
-
+// ── Custom Fields card ─────────────────────────────────────────
 function CustomFieldsCard({
   policy,
   token,
@@ -1042,8 +1104,7 @@ function CustomFieldsCard({
   );
 }
 
-// ── Installments card ────────────────────────────────────────────────────────
-
+// ── Installments card ──────────────────────────────────────────
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 function installmentPaymentStatus(
@@ -1505,8 +1566,7 @@ function InstallmentsCard({
   );
 }
 
-// ── Alert Rule card ───────────────────────────────────────────────────────────
-
+// ── Alert Rule card ───────────────────────────────────────────
 const STANDARD_LEAD_DAYS = [60, 30, 15, 7, 1];
 
 type IconComponent = React.ComponentType<{ className?: string }>;
