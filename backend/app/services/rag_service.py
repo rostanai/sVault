@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import uuid
 
 import httpx
@@ -133,16 +134,35 @@ async def _retrieve(db: AsyncSession, user: CurrentUser, question: str, limit: i
     if org is not None:
         where += " and org_id = :o"
         params["o"] = str(org)
+    # 1) Strict full-text: every query term must match (best relevance).
     rows = (await db.execute(text(
         f"select policy_id, content, ts_rank(to_tsvector('english', content),"
         f" plainto_tsquery('english', :q)) as rank from document_chunks where {where}"
         f" and to_tsvector('english', content) @@ plainto_tsquery('english', :q)"
         f" order by rank desc limit :k"), params)).all()
-    if not rows:
+    if rows:
+        return rows
+
+    # 2) Looser full-text: ANY significant query word matches (OR). plainto_tsquery
+    #    ANDs every term, so one off-vocabulary word yields nothing — this recovers
+    #    paraphrased questions. Words are sanitised to alphanumerics (safe tsquery).
+    words = [w for w in re.findall(r"[A-Za-z0-9]+", question.lower()) if len(w) > 2]
+    if words:
+        orq = " | ".join(words)
         rows = (await db.execute(text(
-            f"select policy_id, content, 0 as rank from document_chunks where {where}"
-            f" and content ilike :like order by created_at desc limit :k"),
-            {**params, "like": f"%{question[:60]}%"})).all()
+            f"select policy_id, content, ts_rank(to_tsvector('english', content),"
+            f" to_tsquery('english', :orq)) as rank from document_chunks where {where}"
+            f" and to_tsvector('english', content) @@ to_tsquery('english', :orq)"
+            f" order by rank desc limit :k"), {**params, "orq": orq})).all()
+        if rows:
+            return rows
+
+    # 3) Last resort: return the tenant's most recent chunks so general questions
+    #    ("summarise my policies") still get grounded context. The system prompt
+    #    constrains the model to answer only from this context, or say it can't.
+    rows = (await db.execute(text(
+        f"select policy_id, content, 0 as rank from document_chunks where {where}"
+        f" order by created_at desc limit :k"), params)).all()
     return rows
 
 
