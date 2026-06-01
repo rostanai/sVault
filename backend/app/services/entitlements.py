@@ -124,8 +124,17 @@ async def get_entitlements(db: AsyncSession, tenant_id: str | uuid.UUID) -> dict
     if sub is None:
         return _FREE_ENTITLEMENTS
 
-    # Trialing tenants get Pro-level access during the trial (FEATURES §16).
+    # Trialing tenants get full access during the trial (FEATURES §16). If the
+    # trial is attached to a specific plan (e.g. Enterprise), honor THAT plan's
+    # entitlements — an Enterprise trial must include Enterprise-only features
+    # such as SSO. Fall back to the generic Pro-level trial defaults otherwise.
     if sub.status == "trialing":
+        if sub.plan_id is not None:
+            plan = (
+                await db.execute(select(Plan).where(Plan.id == sub.plan_id))
+            ).scalar_one_or_none()
+            if plan and plan.entitlements:
+                return plan.entitlements
         return _PRO_ENTITLEMENTS
 
     # Cancelled / expired / past_due → fall back to free

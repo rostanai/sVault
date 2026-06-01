@@ -79,6 +79,31 @@ def _envelope(code: str, message: str, details: Any | None) -> dict:
     }
 
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    """CORS headers for an error response that bypasses CORSMiddleware.
+
+    The catch-all Exception (500) handler is invoked by Starlette's outermost
+    ServerErrorMiddleware — *outside* CORSMiddleware — so its responses carry no
+    Access-Control-Allow-Origin header and the browser masks the real 500 as a
+    misleading "blocked by CORS policy" error. We re-derive the same headers
+    CORSMiddleware would have added: echo the request Origin when it is allowed.
+    """
+    from app.core.config import settings  # local import avoids a config import cycle
+
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    allowed = settings.cors_origins_list
+    permit_all = not allowed and not settings.is_prod
+    if permit_all or origin in allowed:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
@@ -97,12 +122,16 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def _unhandled(_: Request, exc: Exception) -> JSONResponse:
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
         # Log the full trace server-side; return a generic 500 to the client.
+        # This handler runs in ServerErrorMiddleware (outside CORSMiddleware), so we
+        # must attach CORS headers ourselves — otherwise the browser reports a 500 as
+        # a misleading "blocked by CORS policy" error and the real envelope is hidden.
         log.exception("unhandled_error: %s", exc)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=_envelope(
                 ErrorCode.internal_error.value, "Something went wrong", None
             ),
+            headers=_cors_headers(request),
         )
