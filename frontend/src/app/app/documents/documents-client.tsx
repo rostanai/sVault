@@ -13,14 +13,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   FileText,
   Search,
   Download,
+  Eye,
   Paperclip,
   AlertTriangle,
 } from "lucide-react";
 
-// ── Types ───────────────────────────────────────────────────
+// Inline-viewable types (rendered in an iframe); others just download.
+function isViewable(mime: string | null | undefined, fileName: string): boolean {
+  const m = (mime ?? "").toLowerCase();
+  if (m.includes("pdf") || m.startsWith("image/")) return true;
+  return /\.(pdf|png|jpe?g|webp|gif)$/i.test(fileName);
+}
+
+// ── Types ────────────────────────────────────────────────────
 interface Props {
   token: string;
 }
@@ -40,7 +54,7 @@ const DOC_TYPE_FILTERS: { value: DocTypeFilter; label: string }[] = [
 
 const DEBOUNCE_MS = 350;
 
-// ── Helpers ─────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -79,6 +93,7 @@ export default function DocumentsClient({ token }: Props) {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [docTypeFilter, setDocTypeFilter] = useState<DocTypeFilter>("all");
+  const [viewer, setViewer] = useState<DocumentLibraryItem | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Debounce search ──────────────────────────────────────
@@ -137,7 +152,7 @@ export default function DocumentsClient({ token }: Props) {
           Document Library
         </h2>
         <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
-          Search and download every policy document in one place.
+          Search, view, and download every policy document in one place.
         </p>
       </div>
 
@@ -205,28 +220,72 @@ export default function DocumentsClient({ token }: Props) {
       ) : docs.length === 0 ? (
         <EmptyState hasFilter={hasActiveFilter} isSearching={isSearching} />
       ) : (
-        <DocList docs={docs} />
+        <DocList docs={docs} onView={setViewer} />
       )}
+
+      {/* In-app document viewer — view PDFs/images without downloading */}
+      <Dialog open={viewer !== null} onOpenChange={(o) => !o && setViewer(null)}>
+        <DialogContent className="max-w-5xl w-[95vw] p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+            <DialogTitle className="text-sm font-semibold truncate pr-8">
+              {viewer?.file_name}
+            </DialogTitle>
+          </DialogHeader>
+          {viewer && (
+            <div className="bg-zinc-100 dark:bg-zinc-950">
+              <iframe
+                src={viewer.download_url}
+                title={viewer.file_name}
+                className="w-full h-[78vh] border-0 bg-white"
+              />
+              <div className="flex justify-end gap-2 px-4 py-2 border-t border-zinc-200 dark:border-zinc-800">
+                <a
+                  href={viewer.download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-600/10"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Open / download
+                </a>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 // ── Document list ──────────────────────────────────────────
-function DocList({ docs }: { docs: DocumentLibraryItem[] }) {
+function DocList({
+  docs,
+  onView,
+}: {
+  docs: DocumentLibraryItem[];
+  onView: (doc: DocumentLibraryItem) => void;
+}) {
   return (
     <ul
       className="divide-y divide-zinc-100 dark:divide-zinc-800 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden"
       aria-label="Document list"
     >
       {docs.map((doc) => (
-        <DocRow key={doc.id} doc={doc} />
+        <DocRow key={doc.id} doc={doc} onView={onView} />
       ))}
     </ul>
   );
 }
 
 // ── Single document row ──────────────────────────────────────
-function DocRow({ doc }: { doc: DocumentLibraryItem }) {
+function DocRow({
+  doc,
+  onView,
+}: {
+  doc: DocumentLibraryItem;
+  onView: (doc: DocumentLibraryItem) => void;
+}) {
+  const viewable = !!doc.download_url && isViewable(doc.mime_type, doc.file_name);
   return (
     <li className="flex items-start gap-3 px-4 py-3.5 group hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
       {/* File icon */}
@@ -284,38 +343,58 @@ function DocRow({ doc }: { doc: DocumentLibraryItem }) {
         )}
       </div>
 
-      {/* Download / View — disabled when no stored file is available */}
-      {doc.download_url ? (
-        <a
-          href={doc.download_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`View or download ${doc.file_name}`}
-          className={cn(
-            "shrink-0 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-            "text-zinc-500 hover:text-brand-600 hover:bg-brand-600/8",
-            "dark:text-zinc-400 dark:hover:text-brand-400 dark:hover:bg-brand-600/10",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-1"
-          )}
-        >
-          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">View / Download</span>
-        </a>
-      ) : (
-        <span
-          title="No file stored for this document"
-          aria-label="No file available to download"
-          className="shrink-0 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-zinc-300 dark:text-zinc-600 cursor-not-allowed"
-        >
-          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">No file</span>
-        </span>
-      )}
+      {/* Actions — View (in-app) + Download; disabled when no stored file */}
+      <div className="shrink-0 mt-0.5 flex items-center gap-1">
+        {doc.download_url ? (
+          <>
+            {viewable && (
+              <button
+                type="button"
+                onClick={() => onView(doc)}
+                aria-label={`View ${doc.file_name} in app`}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  "text-zinc-500 hover:text-brand-600 hover:bg-brand-600/10",
+                  "dark:text-zinc-400 dark:hover:text-brand-400 dark:hover:bg-brand-600/10",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-1"
+                )}
+              >
+                <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">View</span>
+              </button>
+            )}
+            <a
+              href={doc.download_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Download ${doc.file_name}`}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                "text-zinc-500 hover:text-brand-600 hover:bg-brand-600/10",
+                "dark:text-zinc-400 dark:hover:text-brand-400 dark:hover:bg-brand-600/10",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-1"
+              )}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">Download</span>
+            </a>
+          </>
+        ) : (
+          <span
+            title="No file stored for this document"
+            aria-label="No file available to download"
+            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-zinc-300 dark:text-zinc-600 cursor-not-allowed"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="hidden sm:inline">No file</span>
+          </span>
+        )}
+      </div>
     </li>
   );
 }
 
-// ── Loading skeleton ──────────────────────────────────────────
+// ── Loading skeleton ───────────────────────────────────────────
 function ListSkeleton() {
   return (
     <div
@@ -341,7 +420,7 @@ function ListSkeleton() {
   );
 }
 
-// ── Empty state ────────────────────────────────────────────
+// ── Empty state ──────────────────────────────────────────
 function EmptyState({
   hasFilter,
   isSearching,
@@ -366,7 +445,7 @@ function EmptyState({
   );
 }
 
-// ── Error state ────────────────────────────────────────────
+// ── Error state ─────────────────────────────────────────
 function ErrorState({
   message,
   onRetry,
