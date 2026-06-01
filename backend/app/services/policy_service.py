@@ -121,9 +121,35 @@ async def update_policy(
 
 
 async def delete_policy(db: AsyncSession, user: CurrentUser, policy_id: uuid.UUID) -> None:
-    policy = await get_policy(db, user, policy_id)
+    policy = await get_policy(db, user, policy_id)  # scope-checked (404 if not)
+
+    # DB rows (documents, installments, alerts, chunks, claims) cascade via FK,
+    # but Storage objects do not — collect their paths so we can clean them up
+    # after the row delete and avoid orphaning files in the bucket (cost + DPDP).
+    from app.db.models import PolicyDocument
+
+    doc_paths = (
+        await db.execute(
+            select(PolicyDocument.storage_path).where(
+                PolicyDocument.policy_id == policy.id
+            )
+        )
+    ).scalars().all()
+
     await db.delete(policy)
     await db.commit()
+
+    if doc_paths:
+        import logging
+
+        from app.core import storage
+
+        log = logging.getLogger("svault.policies")
+        for path in doc_paths:
+            try:
+                await storage.delete_object(path)
+            except Exception as exc:  # best-effort — never fail the delete on storage
+                log.warning("policy_delete_orphan_file | path=%s | %s", path, exc)
 
 
 async def _apply_mark_renewed(
