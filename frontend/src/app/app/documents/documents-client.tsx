@@ -20,16 +20,14 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
+// ── Types ───────────────────────────────────────────────────
 interface Props {
   token: string;
 }
 
 type DocTypeFilter = DocType | "all";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
+// ── Constants ────────────────────────────────────────────
 const DOC_TYPE_FILTERS: { value: DocTypeFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "policy", label: "Policy" },
@@ -42,8 +40,7 @@ const DOC_TYPE_FILTERS: { value: DocTypeFilter; label: string }[] = [
 
 const DEBOUNCE_MS = 350;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
+// ── Helpers ─────────────────────────────────────────────
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -74,8 +71,7 @@ function humanizeDocType(docType: string): string {
   return docType.charAt(0).toUpperCase() + docType.slice(1);
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-
+// ── Main component ─────────────────────────────────────────
 export default function DocumentsClient({ token }: Props) {
   const [docs, setDocs] = useState<DocumentLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,7 +81,7 @@ export default function DocumentsClient({ token }: Props) {
   const [docTypeFilter, setDocTypeFilter] = useState<DocTypeFilter>("all");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Debounce search ───────────────────────────────────────────────────────
+  // ── Debounce search ──────────────────────────────────────
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -98,7 +94,7 @@ export default function DocumentsClient({ token }: Props) {
     };
   }, [search]);
 
-  // ── Fetch ─────────────────────────────────────────────────────────────────
+  // ── Fetch ────────────────────────────────────────────
 
   const fetchDocs = useCallback(() => {
     if (!token) {
@@ -124,13 +120,13 @@ export default function DocumentsClient({ token }: Props) {
     fetchDocs();
   }, [fetchDocs]);
 
-  // ── Derived state ─────────────────────────────────────────────────────────
+  // ── Derived state ──────────────────────────────────────
 
   const hasActiveFilter =
     debouncedSearch.trim().length > 0 || docTypeFilter !== "all";
   const isSearching = debouncedSearch.trim().length > 0;
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────
 
   return (
     <div className="space-y-5">
@@ -215,8 +211,7 @@ export default function DocumentsClient({ token }: Props) {
   );
 }
 
-// ── Document list ─────────────────────────────────────────────────────────────
-
+// ── Document list ──────────────────────────────────────────
 function DocList({ docs }: { docs: DocumentLibraryItem[] }) {
   return (
     <ul
@@ -230,8 +225,7 @@ function DocList({ docs }: { docs: DocumentLibraryItem[] }) {
   );
 }
 
-// ── Single document row ───────────────────────────────────────────────────────
-
+// ── Single document row ──────────────────────────────────────
 function DocRow({ doc }: { doc: DocumentLibraryItem }) {
   return (
     <li className="flex items-start gap-3 px-4 py-3.5 group hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
@@ -290,28 +284,38 @@ function DocRow({ doc }: { doc: DocumentLibraryItem }) {
         )}
       </div>
 
-      {/* Download button */}
-      <a
-        href={doc.download_url}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Download ${doc.file_name}`}
-        className={cn(
-          "shrink-0 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-          "text-zinc-500 hover:text-brand-600 hover:bg-brand-600/8",
-          "dark:text-zinc-400 dark:hover:text-brand-400 dark:hover:bg-brand-600/10",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-1"
-        )}
-      >
-        <Download className="h-3.5 w-3.5" aria-hidden="true" />
-        <span className="hidden sm:inline">Download</span>
-      </a>
+      {/* Download / View — disabled when no stored file is available */}
+      {doc.download_url ? (
+        <a
+          href={doc.download_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`View or download ${doc.file_name}`}
+          className={cn(
+            "shrink-0 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+            "text-zinc-500 hover:text-brand-600 hover:bg-brand-600/8",
+            "dark:text-zinc-400 dark:hover:text-brand-400 dark:hover:bg-brand-600/10",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-1"
+          )}
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="hidden sm:inline">View / Download</span>
+        </a>
+      ) : (
+        <span
+          title="No file stored for this document"
+          aria-label="No file available to download"
+          className="shrink-0 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-zinc-300 dark:text-zinc-600 cursor-not-allowed"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="hidden sm:inline">No file</span>
+        </span>
+      )}
     </li>
   );
 }
 
-// ── Loading skeleton ──────────────────────────────────────────────────────────
-
+// ── Loading skeleton ──────────────────────────────────────────
 function ListSkeleton() {
   return (
     <div
@@ -337,8 +341,7 @@ function ListSkeleton() {
   );
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
-
+// ── Empty state ────────────────────────────────────────────
 function EmptyState({
   hasFilter,
   isSearching,
@@ -363,8 +366,7 @@ function EmptyState({
   );
 }
 
-// ── Error state ───────────────────────────────────────────────────────────────
-
+// ── Error state ────────────────────────────────────────────
 function ErrorState({
   message,
   onRetry,
