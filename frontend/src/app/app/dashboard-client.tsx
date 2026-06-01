@@ -47,8 +47,25 @@ export default function DashboardClient({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  const [checklistDismissed, setChecklistDismissed] = useState(false);
   // undefined = loading; null = failed/hidden; data = loaded
   const [group, setGroup] = useState<GroupDashboardResponse | null | undefined>(undefined);
+
+  // Restore a previously dismissed getting-started checklist (per browser).
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setChecklistDismissed(
+        window.localStorage.getItem("svault.onboarding.dismissed") === "1"
+      );
+    }
+  }, []);
+
+  function dismissChecklist() {
+    setChecklistDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("svault.onboarding.dismissed", "1");
+    }
+  }
 
   useEffect(() => {
     if (!token) {
@@ -80,6 +97,17 @@ export default function DashboardClient({ token }: Props) {
 
   const { totals, status_counts, expiring, by_category, upcoming } = data;
 
+  // Derived analytics (computed from the data already loaded — no extra fetch)
+  const premiumNum = Number(totals.premium_inr) || 0;
+  const sumInsuredNum = Number(totals.sum_insured_inr) || 0;
+  const activeRatePct =
+    totals.policies > 0
+      ? Math.round(((status_counts.active ?? 0) / totals.policies) * 100)
+      : 0;
+  const avgPremium =
+    totals.policies > 0 ? (premiumNum / totals.policies).toFixed(0) : "0";
+  const coverMultiple = premiumNum > 0 ? sumInsuredNum / premiumNum : 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -89,9 +117,9 @@ export default function DashboardClient({ token }: Props) {
         </p>
       </div>
 
-      {/* Onboarding checklist — shown only while incomplete */}
-      {onboarding && !onboarding.complete && (
-        <OnboardingChecklist status={onboarding} />
+      {/* Onboarding checklist — shown only while incomplete and not dismissed */}
+      {onboarding && !onboarding.complete && !checklistDismissed && (
+        <OnboardingChecklist status={onboarding} onDismiss={dismissChecklist} />
       )}
 
       {/* Stat cards */}
@@ -129,6 +157,45 @@ export default function DashboardClient({ token }: Props) {
         <ExpiryCard label="Expiring in 60 days" count={expiring.next_60} variant="warning" />
         <ExpiryCard label="Expiring in 90 days" count={expiring.next_90} variant="secondary" />
       </div>
+
+      {/* Portfolio analytics — derived insights */}
+      {totals.policies > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Portfolio Analytics
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <InsightCard
+              label="Active rate"
+              value={`${activeRatePct}%`}
+              hint={`${status_counts.active ?? 0} of ${totals.policies} active`}
+              accent="from-emerald-500/15 to-emerald-500/0"
+              barPct={activeRatePct}
+              barClass="bg-emerald-500"
+            />
+            <InsightCard
+              label="Avg premium / policy"
+              value={formatINR(avgPremium)}
+              hint="Across all policies"
+              accent="from-violet-500/15 to-violet-500/0"
+            />
+            <InsightCard
+              label="Cover multiple"
+              value={coverMultiple > 0 ? `${coverMultiple.toFixed(1)}×` : "—"}
+              hint="Sum insured ÷ premium"
+              accent="from-brand-500/15 to-brand-500/0"
+            />
+            <InsightCard
+              label="Expiring ≤ 90 days"
+              value={String(expiring.next_90)}
+              hint="Need renewal attention"
+              accent="from-amber-500/15 to-amber-500/0"
+              barPct={totals.policies > 0 ? Math.round((expiring.next_90 / totals.policies) * 100) : 0}
+              barClass="bg-amber-400"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Charts row */}
       <div className="grid gap-4 lg:grid-cols-3">
@@ -233,8 +300,7 @@ export default function DashboardClient({ token }: Props) {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
+// ── Sub-components ───────────────────────────────────────────
 function StatCard({
   title,
   value,
@@ -258,6 +324,45 @@ function StatCard({
       </CardHeader>
       <CardContent>
         <p className={`text-2xl font-bold ${valueClass ?? ""}`}>{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InsightCard({
+  label,
+  value,
+  hint,
+  accent,
+  barPct,
+  barClass,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  accent: string;
+  barPct?: number;
+  barClass?: string;
+}) {
+  return (
+    <Card className={`relative overflow-hidden bg-gradient-to-br ${accent}`}>
+      <CardContent className="p-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          {label}
+        </p>
+        <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
+        {hint && <p className="mt-0.5 text-xs text-zinc-400">{hint}</p>}
+        {barPct != null && (
+          <div
+            className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200/70 dark:bg-zinc-700/70"
+            aria-hidden="true"
+          >
+            <div
+              className={`h-full rounded-full ${barClass ?? "bg-brand-600"} transition-all duration-500`}
+              style={{ width: `${Math.min(100, Math.max(0, barPct))}%` }}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );
