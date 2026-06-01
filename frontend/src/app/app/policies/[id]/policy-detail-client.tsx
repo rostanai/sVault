@@ -926,6 +926,12 @@ export default function PolicyDetailClient({ id, token }: Props) {
 }
 
 // ── Custom Fields card ─────────────────────────────────────────
+
+interface CustomFieldRow {
+  key: string;
+  value: string;
+}
+
 function CustomFieldsCard({
   policy,
   token,
@@ -1104,7 +1110,7 @@ function CustomFieldsCard({
   );
 }
 
-// ── Installments card ──────────────────────────────────────────
+// ── Installments card ─────────────────────────────────────────
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 function installmentPaymentStatus(
