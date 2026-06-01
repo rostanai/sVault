@@ -7,9 +7,9 @@ error — hiding the real failure. These tests lock in that 500s echo an allowed
 """
 import httpx
 import pytest
+from fastapi import FastAPI
 
 from app.core.errors import register_error_handlers
-from fastapi import FastAPI
 
 
 def _app_that_blows_up() -> FastAPI:
