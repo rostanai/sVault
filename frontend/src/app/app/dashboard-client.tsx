@@ -40,11 +40,13 @@ import {
 
 interface Props {
   token: string;
+  /** Server-prefetched dashboard data — when present, renders immediately. */
+  initialData?: DashboardResponse | null;
 }
 
-export default function DashboardClient({ token }: Props) {
-  const [data, setData] = useState<DashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function DashboardClient({ token, initialData }: Props) {
+  const [data, setData] = useState<DashboardResponse | null>(initialData ?? null);
+  const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [checklistDismissed, setChecklistDismissed] = useState(false);
@@ -85,11 +87,14 @@ export default function DashboardClient({ token }: Props) {
       .then(setGroup)
       .catch(() => setGroup(null));
 
-    getDashboard(token)
-      .then(setData)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [token]);
+    // Skip the client fetch when the server already prefetched the data.
+    if (!initialData) {
+      getDashboard(token)
+        .then(setData)
+        .catch((err: Error) => setError(err.message))
+        .finally(() => setLoading(false));
+    }
+  }, [token, initialData]);
 
   if (loading) return <DashboardSkeleton />;
   if (error) return <ErrorState message={error} />;
