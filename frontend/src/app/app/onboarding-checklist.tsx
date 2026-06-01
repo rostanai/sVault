@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle2, Circle } from "lucide-react";
+import { CheckCircle2, Circle, X } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { OnboardingStatus, OnboardingStep } from "@/lib/api";
 
 interface OnboardingChecklistProps {
   status: OnboardingStatus;
+  /** When provided, renders a dismiss (X) button that calls this handler. */
+  onDismiss?: () => void;
 }
 
-export function OnboardingChecklist({ status }: OnboardingChecklistProps) {
+export function OnboardingChecklist({ status, onDismiss }: OnboardingChecklistProps) {
   if (status.complete) return null;
 
   const progressPct =
@@ -33,12 +35,25 @@ export function OnboardingChecklist({ status }: OnboardingChecklistProps) {
               {status.completed_count} of {status.total} done
             </p>
           </div>
-          <span
-            className="shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400"
-            aria-hidden="true"
-          >
-            {progressPct}%
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className="text-xs font-medium text-brand-600 dark:text-brand-400"
+              aria-hidden="true"
+            >
+              {progressPct}%
+            </span>
+            {onDismiss && (
+              <button
+                type="button"
+                onClick={onDismiss}
+                aria-label="Dismiss the getting-started checklist"
+                title="Dismiss"
+                className="rounded-md p-1 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Progress bar */}
