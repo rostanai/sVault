@@ -59,7 +59,7 @@ import {
   Send,
 } from "lucide-react";
 
-// ── Constants ──────────────────────────────────────────────────────────────────
+// ── Constants ───────────────────────────────────────────────────────────
 
 const WEBHOOK_EVENTS = [
   "policy.created",
@@ -71,17 +71,17 @@ const WEBHOOK_EVENTS = [
 
 type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
-// ── Props ──────────────────────────────────────────────────────────────────────
+// ── Props ─────────────────────────────────────────────────────────────────
 
 interface Props {
   token: string;
 }
 
-// ── Root component ─────────────────────────────────────────────────────────────
+// ── Root component ───────────────────────────────────────────────────────
 
 export default function DeveloperClient({ token }: Props) {
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-6 max-w-6xl mx-auto">
       {/* Page header */}
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white">
@@ -119,7 +119,7 @@ export default function DeveloperClient({ token }: Props) {
   );
 }
 
-// ── API Keys Tab ───────────────────────────────────────────────────────────────
+// ── API Keys Tab ─────────────────────────────────────────────────────────────
 
 function ApiKeysTab({ token }: { token: string }) {
   const [keys, setKeys] = useState<ApiKeyRead[]>([]);
@@ -313,7 +313,7 @@ function ApiKeyRow({
   );
 }
 
-// ── Create Key Dialog ──────────────────────────────────────────────────────────
+// ── Create Key Dialog ─────────────────────────────────────────────────────────
 
 function CreateKeyDialog({
   token,
@@ -557,7 +557,7 @@ function CreateKeyDialog({
   );
 }
 
-// ── Webhooks Tab ───────────────────────────────────────────────────────────────
+// ── Webhooks Tab ──────────────────────────────────────────────────────────────
 
 function WebhooksTab({ token }: { token: string }) {
   const [hooks, setHooks] = useState<WebhookRead[]>([]);
@@ -783,7 +783,7 @@ function WebhookRow({
   );
 }
 
-// ── Add Webhook Dialog ─────────────────────────────────────────────────────────
+// ── Add Webhook Dialog ───────────────────────────────────────────────────────
 
 function AddWebhookDialog({
   token,
@@ -1033,7 +1033,7 @@ function AddWebhookDialog({
   );
 }
 
-// ── Shared helpers ─────────────────────────────────────────────────────────────
+// ── Shared helpers ──────────────────────────────────────────────────────────────
 
 function TableSkeleton({ rows, cols }: { rows: number; cols: number }) {
   return (
