@@ -312,7 +312,7 @@ export default function PolicyDetailClient({ id, token }: Props) {
   ];
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Back */}
       <div>
         <Button variant="ghost" size="sm" asChild>
@@ -2033,7 +2033,7 @@ function DocumentsCard({
 
 function DetailSkeleton() {
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       <Skeleton className="h-8 w-20" />
       <div className="space-y-2">
         <Skeleton className="h-8 w-64" />
