@@ -24,6 +24,7 @@ class ErrorCode(StrEnum):
     forbidden = "forbidden"
     not_found = "not_found"
     conflict = "conflict"
+    duplicate_document = "duplicate_document"
     rate_limited = "rate_limited"
     entitlement_required = "entitlement_required"
     payment_required = "payment_required"
@@ -37,6 +38,7 @@ _STATUS = {
     ErrorCode.forbidden: status.HTTP_403_FORBIDDEN,
     ErrorCode.not_found: status.HTTP_404_NOT_FOUND,
     ErrorCode.conflict: status.HTTP_409_CONFLICT,
+    ErrorCode.duplicate_document: status.HTTP_409_CONFLICT,
     ErrorCode.rate_limited: status.HTTP_429_TOO_MANY_REQUESTS,
     ErrorCode.entitlement_required: status.HTTP_403_FORBIDDEN,
     ErrorCode.payment_required: status.HTTP_402_PAYMENT_REQUIRED,

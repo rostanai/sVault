@@ -94,6 +94,7 @@ class PolicyDocument(Base, UUIDPK):
     mime_type: Mapped[str | None] = mapped_column(String)
     size_bytes: Mapped[int | None] = mapped_column()
     version: Mapped[int] = mapped_column(default=1)
+    content_hash: Mapped[str | None] = mapped_column(String)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("profiles.id")
     )
