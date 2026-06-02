@@ -56,8 +56,7 @@ import {
   Pencil,
 } from "lucide-react";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
+// ── Types ─────────────────────────────────────────────────────────
 interface Props {
   id: string;
   token: string;
@@ -90,8 +89,7 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
-
+// ── Main component ───────────────────────────────────────────────
 export default function ProviderDetailClient({ id, token }: Props) {
   const [provider, setProvider] = useState<ProviderRead | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,8 +115,7 @@ export default function ProviderDetailClient({ id, token }: Props) {
   // Delete contact state
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // ── Fetchers ────────────────────────────────────────────────────────────────
-
+  // ── Fetchers ───────────────────────────────────────────────────
   const fetchProvider = useCallback(() => {
     if (!token) return;
     setLoading(true);
@@ -154,8 +151,7 @@ export default function ProviderDetailClient({ id, token }: Props) {
     fetchContacts();
   }, [fetchProvider, fetchContacts]);
 
-  // ── Edit provider ────────────────────────────────────────────────────────────
-
+  // ── Edit provider ─────────────────────────────────────────────
   function openEdit() {
     if (!provider) return;
     setEditForm({
@@ -191,8 +187,7 @@ export default function ProviderDetailClient({ id, token }: Props) {
     }
   }
 
-  // ── Log contact ──────────────────────────────────────────────────────────────
-
+  // ── Log contact ────────────────────────────────────────────────
   function resetLogForm() {
     setLogKind("call");
     setLogSubject("");
@@ -222,8 +217,7 @@ export default function ProviderDetailClient({ id, token }: Props) {
     }
   }
 
-  // ── Delete contact ───────────────────────────────────────────────────────────
-
+  // ── Delete contact ─────────────────────────────────────────────
   async function handleDeleteContact(contactId: string) {
     setDeletingId(contactId);
     try {
@@ -237,16 +231,14 @@ export default function ProviderDetailClient({ id, token }: Props) {
     }
   }
 
-  // ── Loading / error gates ────────────────────────────────────────────────────
-
+  // ── Loading / error gates ───────────────────────────────────────
   if (loading) return <DetailSkeleton />;
   if (error) return <ErrorState message={error} onRetry={fetchProvider} />;
   if (!provider) return null;
 
-  // ── Render ───────────────────────────────────────────────────────────────────
-
+  // ── Render ──────────────────────────────────────────────────
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Back link */}
       <div>
         <Button variant="ghost" size="sm" asChild>
@@ -713,11 +705,10 @@ export default function ProviderDetailClient({ id, token }: Props) {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
+// ── Sub-components ───────────────────────────────────────────────────
 function DetailSkeleton() {
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       <Skeleton className="h-8 w-32" />
       <div className="flex items-center gap-3">
         <Skeleton className="h-7 w-7 rounded-full" />
