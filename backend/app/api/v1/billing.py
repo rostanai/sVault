@@ -35,7 +35,7 @@ from app.schemas.billing import (
     UsageResponse,
 )
 from app.services import subscription_service, usage_service
-from app.services.entitlements import get_entitlements
+from app.services.entitlements import resolve_entitlements
 
 log = logging.getLogger("svault.billing")
 
@@ -104,10 +104,12 @@ async def get_subscription(
     if not user.tenant_id:
         raise AppError(ErrorCode.unauthorized, "No tenant context")
     sub = await subscription_service.get_current(db, user.tenant_id)
-    ents = await get_entitlements(db, user.tenant_id)
+    ents, locked, effective_status = await resolve_entitlements(db, user.tenant_id)
     return SubscriptionWithEntitlements(
         subscription=SubscriptionRead.model_validate(sub) if sub else None,
         entitlements=ents,
+        locked=locked,
+        effective_status=effective_status,
     )
 
 

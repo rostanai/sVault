@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AppShell from "@/components/app-shell";
+import UpgradeGate from "@/components/upgrade-gate";
 import { getSubscription, getPlans, getMe } from "@/lib/api";
 
 export default async function AppLayout({
@@ -30,6 +31,7 @@ export default async function AppLayout({
   let subscriptionStatus: string = "free";
   let trialDaysLeft: number | null = null;
   let isSuperAdmin: boolean = false;
+  let locked: boolean = false;
   let token: string = "";
 
   try {
@@ -49,9 +51,18 @@ export default async function AppLayout({
         isSuperAdmin = true;
       }
 
+      // Server-resolved lock flags (added to /billing/subscription server-side).
+      const subExtra = subData as {
+        locked?: boolean;
+        effective_status?: string;
+      } | null;
+
+      // Server-resolved lock: lapsed 14-day trial or expired sub.
+      locked = subExtra?.locked === true && !isSuperAdmin;
+
       const sub = subData?.subscription;
       if (sub) {
-        subscriptionStatus = sub.status;
+        subscriptionStatus = subExtra?.effective_status || sub.status;
 
         // Resolve plan name from the plans list.
         const matchedPlan = plans.find((p) => p.id === sub.plan_id);
@@ -84,7 +95,7 @@ export default async function AppLayout({
       isSuperAdmin={isSuperAdmin}
       token={token}
     >
-      {children}
+      <UpgradeGate locked={locked}>{children}</UpgradeGate>
     </AppShell>
   );
 }
