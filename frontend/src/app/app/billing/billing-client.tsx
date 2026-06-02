@@ -188,7 +188,7 @@ export default function BillingClient({ token }: Props) {
         strategy="lazyOnload"
       />
 
-      <div className="space-y-8 max-w-4xl">
+      <div className="space-y-8 max-w-4xl mx-auto">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Billing</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -361,7 +361,7 @@ export default function BillingClient({ token }: Props) {
   );
 }
 
-// ── Sub-components ───────────────────────────────────────────────────
+// ── Sub-components ───────────────────────────────────────
 
 function PlanCard({
   plan,
@@ -535,7 +535,7 @@ function SubscriptionStatusBadge({ status }: { status: string }) {
   );
 }
 
-// ── Plan Usage Card ──────────────────────────────────────────────────
+// ── Plan Usage Card ─────────────────────────────────────
 
 const USAGE_METRIC_LABELS: { key: string; label: string }[] = [
   { key: "policies",     label: "Policies" },
@@ -691,7 +691,7 @@ function PlanUsageCard({
   );
 }
 
-// ── Subscription lifecycle controls (Cancel / Pause / Resume) ────────
+// ── Subscription lifecycle controls (Cancel / Pause / Resume) ────
 
 type LifecycleAction = "cancel" | "pause" | "resume" | null;
 
@@ -882,7 +882,7 @@ function SubscriptionLifecycleControls({
 
 function BillingSkeleton() {
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="space-y-8 max-w-4xl mx-auto">
       <div className="space-y-1">
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-4 w-48" />
