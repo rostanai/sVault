@@ -114,6 +114,7 @@ export default function PoliciesClient({ token }: Props) {
   const [newCategory, setNewCategory] = useState<PolicyCategory>("vehicle");
   const [newOrgId, setNewOrgId] = useState("");
   const [newPolicyNumber, setNewPolicyNumber] = useState("");
+  const [newInsurer, setNewInsurer] = useState("");
   const [newSumInsured, setNewSumInsured] = useState("");
   const [newPremium, setNewPremium] = useState("");
   const [newGst, setNewGst] = useState("");
@@ -182,15 +183,11 @@ export default function PoliciesClient({ token }: Props) {
     setNewInceptionDate(extraction.inception_date ?? "");
     setNewExpiryDate(extraction.expiry_date ?? "");
     setAiPrefilled(true);
+    // Pre-fill the insurer/provider; on submit the backend find-or-creates this
+    // provider and links it, so it also appears on the Providers page.
+    setNewInsurer(extraction.insurer_name ?? "");
     // Open the create dialog in pre-filled (review) mode
     setDialogOpen(true);
-    // Surface insurer name hint — no provider_id field on the form
-    if (extraction.insurer_name) {
-      toast.info(`Insurer: ${extraction.insurer_name}`, {
-        description: "Add them under Providers to link future policies.",
-        duration: 8000,
-      });
-    }
   }
 
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -236,6 +233,7 @@ export default function PoliciesClient({ token }: Props) {
         category: newCategory,
         title: newTitle,
         policy_number: newPolicyNumber || undefined,
+        provider_name: newInsurer || undefined,
         sum_insured_inr: newSumInsured || undefined,
         premium_inr: newPremium || undefined,
         gst_inr: newGst || undefined,
@@ -270,6 +268,7 @@ export default function PoliciesClient({ token }: Props) {
     setNewTitle("");
     setNewCategory("vehicle");
     setNewPolicyNumber("");
+    setNewInsurer("");
     setNewSumInsured("");
     setNewPremium("");
     setNewGst("");
@@ -491,6 +490,20 @@ export default function PoliciesClient({ token }: Props) {
                     onChange={(e) => setNewPolicyNumber(e.target.value)}
                     disabled={submitting}
                   />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="newInsurer">Insurer / Provider</Label>
+                  <Input
+                    id="newInsurer"
+                    placeholder="e.g. Zurich Kotak General Insurance"
+                    value={newInsurer}
+                    onChange={(e) => setNewInsurer(e.target.value)}
+                    disabled={submitting}
+                  />
+                  <p className="text-xs text-zinc-400">
+                    Auto-filled from the document. Saved to Providers and linked to this policy.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

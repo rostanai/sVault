@@ -220,6 +220,7 @@ export interface PolicyCreate {
   title: string;
   policy_number?: string;
   provider_id?: string;
+  provider_name?: string;
   sum_insured_inr?: string;
   premium_inr?: string;
   gst_inr?: string;

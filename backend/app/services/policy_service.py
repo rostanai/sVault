@@ -83,13 +83,26 @@ async def get_policy(db: AsyncSession, user: CurrentUser, policy_id: uuid.UUID) 
 
 
 async def create_policy(db: AsyncSession, user: CurrentUser, payload: PolicyCreate) -> Policy:
+    # Resolve the provider: prefer an explicit provider_id; otherwise, if a
+    # provider_name was supplied (e.g. the insurer from AI intake), find-or-create
+    # the matching tenant provider and link it. Both rows commit atomically below.
+    provider_id = payload.provider_id
+    if provider_id is None and payload.provider_name:
+        from app.services import provider_service  # local import avoids a cycle
+
+        provider = await provider_service.find_or_create_by_name(
+            db, user, payload.provider_name
+        )
+        if provider is not None:
+            provider_id = provider.id
+
     policy = Policy(
         tenant_id=uuid.UUID(user.tenant_id),
         org_id=payload.org_id,
         category=payload.category,
         title=payload.title,
         policy_number=payload.policy_number,
-        provider_id=payload.provider_id,
+        provider_id=provider_id,
         owner_id=payload.owner_id or uuid.UUID(user.user_id),
         sum_insured_inr=payload.sum_insured_inr,
         premium_inr=payload.premium_inr,
