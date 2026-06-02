@@ -47,8 +47,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ── Status helpers ────────────────────────────────────────────────────────
-
+// ── Status helpers ─────────────────────────────────────────────────
 const CLAIM_STATUSES: { value: ClaimStatus; label: string }[] = [
   { value: "draft", label: "Draft" },
   { value: "reported", label: "Reported" },
@@ -107,15 +106,13 @@ function humanizeEventType(eventType: string): string {
     .join(" ");
 }
 
-// ── Props ────────────────────────────────────────────────────────────────
-
+// ── Props ────────────────────────────────────────────────────
 interface Props {
   id: string;
   token: string;
 }
 
-// ── Edit form state ───────────────────────────────────────────────────────
-
+// ── Edit form state ───────────────────────────────────────────
 interface EditFormState {
   claim_number: string;
   claim_amount_inr: string;
@@ -123,8 +120,7 @@ interface EditFormState {
   description: string;
 }
 
-// ── Main component ────────────────────────────────────────────────────────
-
+// ── Main component ───────────────────────────────────────────
 export default function ClaimDetailClient({ id, token }: Props) {
   const [claim, setClaim] = useState<ClaimRead | null>(null);
   const [events, setEvents] = useState<ClaimEvent[]>([]);
@@ -148,8 +144,7 @@ export default function ClaimDetailClient({ id, token }: Props) {
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
 
-  // ── Fetch claim + events ──────────────────────────────────────────────
-
+  // ── Fetch claim + events ───────────────────────────────────
   const fetchClaim = useCallback(() => {
     if (!token) return;
     setLoading(true);
@@ -188,7 +183,6 @@ export default function ClaimDetailClient({ id, token }: Props) {
   }, [fetchClaim, fetchEvents]);
 
   // ── Update claim (status + approved_amount + note) ────────────────────
-
   async function handleUpdate() {
     if (!claim) return;
     const payload: ClaimUpdate = {};
@@ -221,8 +215,7 @@ export default function ClaimDetailClient({ id, token }: Props) {
     }
   }
 
-  // ── Edit dialog ───────────────────────────────────────────────────────
-
+  // ── Edit dialog ──────────────────────────────────────────
   function openEditDialog() {
     if (!claim) return;
     setEditForm({
@@ -269,8 +262,7 @@ export default function ClaimDetailClient({ id, token }: Props) {
     }
   }
 
-  // ── Loading / error ───────────────────────────────────────────────────
-
+  // ── Loading / error ───────────────────────────────────────
   if (loading) return <DetailSkeleton />;
   if (error) return <ErrorState message={error} onRetry={fetchClaim} />;
   if (!claim) return null;
@@ -279,7 +271,7 @@ export default function ClaimDetailClient({ id, token }: Props) {
     claim.status === "settled" || claim.status === "closed";
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Back link */}
       <div>
         <Button variant="ghost" size="sm" asChild>
@@ -730,11 +722,10 @@ export default function ClaimDetailClient({ id, token }: Props) {
   );
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────
-
+// ── Skeleton ─────────────────────────────────────────────────
 function DetailSkeleton() {
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       <Skeleton className="h-8 w-24" />
       <div className="space-y-2">
         <Skeleton className="h-8 w-56" />
@@ -770,8 +761,7 @@ function DetailSkeleton() {
   );
 }
 
-// ── Error state ───────────────────────────────────────────────────────────
-
+// ── Error state ─────────────────────────────────────────────
 function ErrorState({
   message,
   onRetry,
@@ -780,7 +770,7 @@ function ErrorState({
   onRetry: () => void;
 }) {
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4 max-w-4xl mx-auto">
       <Button variant="ghost" size="sm" asChild>
         <Link href="/app/claims" className="flex items-center gap-1.5">
           <ArrowLeft className="h-4 w-4" />

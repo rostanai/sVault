@@ -72,8 +72,7 @@ import {
   Key,
 } from "lucide-react";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
+// ── Constants ───────────────────────────────────────────────────────────
 const TIER_OPTIONS = ["free", "starter", "professional", "enterprise"] as const;
 type Tier = (typeof TIER_OPTIONS)[number];
 
@@ -126,17 +125,15 @@ const SECRET_KEYS: SecretKeyDef[] = [
   },
 ];
 
-// ── Props ─────────────────────────────────────────────────────────────────────
-
+// ── Props ───────────────────────────────────────────────────────────
 interface Props {
   token: string;
 }
 
-// ── Root component ────────────────────────────────────────────────────────────
-
+// ── Root component ───────────────────────────────────────────────
 export default function AdminClient({ token }: Props) {
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-6 max-w-6xl mx-auto">
       {/* Page header */}
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white">
@@ -188,8 +185,7 @@ export default function AdminClient({ token }: Props) {
   );
 }
 
-// ── Overview Tab ──────────────────────────────────────────────────────────────
-
+// ── Overview Tab ───────────────────────────────────────────────
 function OverviewTab({ token }: { token: string }) {
   const [analytics, setAnalytics] = useState<PlatformAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -323,8 +319,7 @@ function subStatusVariant(
   return "secondary";
 }
 
-// ── Plans Tab ─────────────────────────────────────────────────────────────────
-
+// ── Plans Tab ────────────────────────────────────────────────────────
 function PlansTab({ token }: { token: string }) {
   const [plans, setPlans] = useState<PlanRead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -408,8 +403,7 @@ function PlansTab({ token }: { token: string }) {
   );
 }
 
-// ── Edit Plan Dialog ──────────────────────────────────────────────────────────
-
+// ── Edit Plan Dialog ───────────────────────────────────────────────
 function EditPlanDialog({
   token,
   plan,
@@ -539,8 +533,7 @@ function EditPlanDialog({
   );
 }
 
-// ── New Plan Dialog ───────────────────────────────────────────────────────────
-
+// ── New Plan Dialog ────────────────────────────────────────────────
 function NewPlanDialog({
   token,
   onCreated,
@@ -672,8 +665,7 @@ function NewPlanDialog({
   );
 }
 
-// ── Shared plan form fields ───────────────────────────────────────────────────
-
+// ── Shared plan form fields ────────────────────────────────────────────
 interface PlanFormFieldsProps {
   tier?: Tier;
   setTier?: (v: Tier) => void;
@@ -849,8 +841,7 @@ function PlanFormFields({
   );
 }
 
-// ── Tenants Tab ─────────────────────────────────────────────────────────────────
-
+// ── Tenants Tab ──────────────────────────────────────────────────────────
 function TenantsTab({ token }: { token: string }) {
   const [tenants, setTenants] = useState<PlatformTenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -972,16 +963,7 @@ function TenantsTab({ token }: { token: string }) {
   );
 }
 
-// ── Settings Tab ───────────────────────────────────────────────────────────────
-
-interface SettingRowState {
-  currentValue: string | null; // null = "Not set"
-  inputValue: string;
-  visible: boolean;
-  loading: boolean;
-  saving: boolean;
-}
-
+// ── Settings Tab ────────────────────────────────────────────────────────
 function SettingsTab({ token }: { token: string }) {
   // initialising state for all known keys
   const [rows, setRows] = useState<Record<string, SettingRowState>>(() =>
@@ -1055,7 +1037,7 @@ function SettingsTab({ token }: { token: string }) {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl mx-auto">
       {/* Disclaimer */}
       <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400">
         <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
@@ -1147,8 +1129,15 @@ function SettingsTab({ token }: { token: string }) {
   );
 }
 
-// ── Shared helpers ─────────────────────────────────────────────────────────────────
+interface SettingRowState {
+  currentValue: string | null; // null = "Not set"
+  inputValue: string;
+  visible: boolean;
+  loading: boolean;
+  saving: boolean;
+}
 
+// ── Shared helpers ────────────────────────────────────────────────────────
 function TableSkeleton({ rows, cols }: { rows: number; cols: number }) {
   return (
     <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
