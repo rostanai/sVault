@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -78,6 +79,16 @@ _PRO_ENTITLEMENTS: dict = {
     },
 }
 
+# Hard-lock entitlements — applied once a 14-day trial lapses without converting
+# to a paid plan, or when a subscription is cancelled/expired. EVERY feature is
+# off and every limit is 0, so the only thing a tenant can do is upgrade. The
+# frontend renders a full upgrade wall on top of this; this server-side lock is
+# the real enforcement (UI gating is convenience only).
+_LOCKED_ENTITLEMENTS: dict = {
+    "features": dict.fromkeys(_PRO_ENTITLEMENTS["features"], False),
+    "limits": {"policies": 0, "users": 0, "alerts_month": 0, "documents": 0},
+}
+
 
 # ---------------------------------------------------------------------------
 # Pure helper functions — no DB, fully unit-testable
@@ -104,53 +115,73 @@ def within_limit(entitlements: dict, key: str, count: int) -> bool:
 # DB-backed helpers
 # ---------------------------------------------------------------------------
 
-async def get_entitlements(db: AsyncSession, tenant_id: str | uuid.UUID) -> dict:
-    """Return the entitlements dict for a tenant.
+def trial_expired(sub: Subscription) -> bool:
+    """True when a trialing subscription is past its trial_ends_at instant."""
+    ends = sub.trial_ends_at
+    return isinstance(ends, datetime) and datetime.now(UTC) >= ends
 
-    Resolves:
-      - Active/trialing subscription with a linked plan → plan.entitlements
-        (if non-empty) or _PRO_ENTITLEMENTS for trialing.
-      - No subscription → _FREE_ENTITLEMENTS.
+
+async def resolve_entitlements(
+    db: AsyncSession, tenant_id: str | uuid.UUID
+) -> tuple[dict, bool, str]:
+    """Resolve (entitlements, locked, effective_status) for a tenant.
+
+    - ``locked`` is True when the tenant has NO access and must upgrade to
+      continue: a lapsed 14-day trial (real-time check against trial_ends_at,
+      even before the daily cron flips the row) or a cancelled/expired sub.
+    - ``effective_status`` is what the UI should display ("expired" for a
+      lapsed trial whose DB row still says "trialing").
 
     Entitlement dict shape: {"features": {...}, "limits": {...}}.
     """
     tid = uuid.UUID(str(tenant_id))
-    stmt = (
-        select(Subscription)
-        .where(Subscription.tenant_id == tid)
-    )
-    sub: Subscription | None = (await db.execute(stmt)).scalar_one_or_none()
+    sub: Subscription | None = (
+        await db.execute(select(Subscription).where(Subscription.tenant_id == tid))
+    ).scalar_one_or_none()
 
     if sub is None:
-        return _FREE_ENTITLEMENTS
+        return _FREE_ENTITLEMENTS, False, "none"
 
-    # Trialing tenants get full access during the trial (FEATURES §16). If the
-    # trial is attached to a specific plan (e.g. Enterprise), honor THAT plan's
-    # entitlements — an Enterprise trial must include Enterprise-only features
-    # such as SSO. Fall back to the generic Pro-level trial defaults otherwise.
+    # Trialing tenants get full access DURING the trial (FEATURES §16). Once the
+    # 14-day window lapses without converting to a paid plan, hard-lock them.
     if sub.status == "trialing":
+        if trial_expired(sub):
+            return _LOCKED_ENTITLEMENTS, True, "expired"
+        # If the trial is attached to a specific plan (e.g. Enterprise), honor
+        # THAT plan's entitlements (SSO etc.); else generic Pro trial defaults.
         if sub.plan_id is not None:
             plan = (
                 await db.execute(select(Plan).where(Plan.id == sub.plan_id))
             ).scalar_one_or_none()
             if plan and plan.entitlements:
-                return plan.entitlements
-        return _PRO_ENTITLEMENTS
+                return plan.entitlements, False, sub.status
+        return _PRO_ENTITLEMENTS, False, sub.status
 
-    # Cancelled / expired / past_due → fall back to free
-    if sub.status in ("cancelled", "expired"):
-        return _FREE_ENTITLEMENTS
+    # Expired (trial lapsed — set by the daily cron, or a finished paid sub) →
+    # hard lock: only the upgrade page is usable.
+    if sub.status == "expired":
+        return _LOCKED_ENTITLEMENTS, True, sub.status
+
+    # Cancelled → downgrade to free tier (they keep basic email-alert access).
+    if sub.status == "cancelled":
+        return _FREE_ENTITLEMENTS, False, sub.status
 
     # Active / paused / past_due with a plan → read plan.entitlements
     if sub.plan_id is not None:
-        plan: Plan | None = (
+        plan = (
             await db.execute(select(Plan).where(Plan.id == sub.plan_id))
         ).scalar_one_or_none()
         if plan and plan.entitlements:
-            return plan.entitlements
+            return plan.entitlements, False, sub.status
 
-    # Fallback: no plan linked yet but subscription exists → free defaults
-    return _FREE_ENTITLEMENTS
+    # Fallback: subscription exists but no plan linked yet → free defaults
+    return _FREE_ENTITLEMENTS, False, sub.status
+
+
+async def get_entitlements(db: AsyncSession, tenant_id: str | uuid.UUID) -> dict:
+    """Return just the entitlements dict for a tenant (see resolve_entitlements)."""
+    ents, _locked, _status = await resolve_entitlements(db, tenant_id)
+    return ents
 
 
 async def has_feature(db: AsyncSession, tenant_id: str | uuid.UUID, feature: str) -> bool:

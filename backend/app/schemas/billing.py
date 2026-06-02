@@ -72,6 +72,11 @@ class SubscriptionWithEntitlements(BaseModel):
     """Subscription + resolved entitlements for the in-app subscription page."""
     subscription: SubscriptionRead | None
     entitlements: dict
+    locked: bool = False
+    """True when the tenant has no access and must upgrade (lapsed 14-day trial or
+    cancelled/expired sub). The frontend renders a full-screen upgrade wall."""
+    effective_status: str = "none"
+    """Display status — "expired" for a lapsed trial whose row still reads "trialing"."""
 
 
 class SubscribeRequest(BaseModel):
