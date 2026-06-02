@@ -9,6 +9,7 @@ import {
   listDocuments,
   getDocumentUploadUrl,
   uploadFileToStorage,
+  sha256Hex,
   recordDocument,
   deleteDocument,
   ingestDocument,
@@ -925,7 +926,7 @@ export default function PolicyDetailClient({ id, token }: Props) {
   );
 }
 
-// ── Custom Fields card ─────────────────────────────────────────
+// Custom Fields card
 
 interface CustomFieldRow {
   key: string;
@@ -1110,7 +1111,8 @@ function CustomFieldsCard({
   );
 }
 
-// ── Installments card ─────────────────────────────────────────
+// Installments card
+
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 function installmentPaymentStatus(
@@ -1572,7 +1574,8 @@ function InstallmentsCard({
   );
 }
 
-// ── Alert Rule card ───────────────────────────────────────────
+// Alert Rule card
+
 const STANDARD_LEAD_DAYS = [60, 30, 15, 7, 1];
 
 type IconComponent = React.ComponentType<{ className?: string }>;
@@ -1846,12 +1849,16 @@ function DocumentsCard({
       await uploadFileToStorage(upload_url, file);
 
       // Step 3 — record the document in the DB so the backend creates the row.
+      // Send a SHA-256 of the file so the backend can reject duplicate uploads
+      // (same file already attached to this policy) with a 409.
+      const content_hash = await sha256Hex(file);
       await recordDocument(token, policyId, {
         storage_path,
         file_name: file.name,
         content_type: file.type,
         size_bytes: file.size,
         doc_type: "policy",
+        content_hash,
       });
 
       toast.success(`"${file.name}" uploaded.`);
