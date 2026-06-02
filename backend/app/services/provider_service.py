@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_found
@@ -21,6 +21,29 @@ from app.schemas.provider_contact import ProviderContactCreate, ProviderUpdate
 # ---------------------------------------------------------------------------
 # Provider helpers
 # ---------------------------------------------------------------------------
+
+async def find_or_create_by_name(
+    db: AsyncSession, user: CurrentUser, name: str
+) -> Provider | None:
+    """Return the tenant's provider with this name (case-insensitive), creating it
+    if absent. Used by AI intake to auto-register the insurer. Returns None for a
+    blank name. The row is flushed (id populated) but NOT committed — the caller's
+    transaction (e.g. create_policy) commits provider + policy atomically.
+    """
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return None
+    stmt = select(Provider).where(
+        Provider.tenant_id == uuid.UUID(user.tenant_id),
+        func.lower(Provider.name) == cleaned.lower(),
+    )
+    provider = (await db.execute(stmt)).scalar_one_or_none()
+    if provider is None:
+        provider = Provider(tenant_id=uuid.UUID(user.tenant_id), name=cleaned)
+        db.add(provider)
+        await db.flush()
+    return provider
+
 
 async def get_provider(
     db: AsyncSession, user: CurrentUser, provider_id: uuid.UUID

@@ -43,6 +43,9 @@ class PolicyCreate(BaseModel):
     title: str
     policy_number: str | None = None
     provider_id: uuid.UUID | None = None
+    # Insurer/provider name (e.g. from AI intake). When given without a provider_id,
+    # the matching provider is found-or-created and linked automatically.
+    provider_name: str | None = None
     owner_id: uuid.UUID | None = None
     sum_insured_inr: Decimal | None = None
     premium_inr: Decimal | None = None
