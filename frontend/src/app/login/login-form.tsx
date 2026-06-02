@@ -16,7 +16,7 @@ async function getSupabase() {
   return createClient();
 }
 
-// ── Value props for the left panel ────────────────────────────────────────────
+// ── Value props for the left panel ──────────────────────────────────────────
 const bullets = [
   {
     icon: Bell,
@@ -32,7 +32,7 @@ const bullets = [
   },
 ];
 
-// ── Google SVG logo ────────────────────────────────────────────────────────────
+// ── Google SVG logo ───────────────────────────────────────────────
 function GoogleIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -56,7 +56,7 @@ function GoogleIcon() {
   );
 }
 
-// ── Divider ────────────────────────────────────────────────────────────────────
+// ── Divider ─────────────────────────────────────────────────────
 function OrDivider() {
   return (
     <div className="relative my-4">
@@ -72,7 +72,7 @@ function OrDivider() {
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -146,7 +146,7 @@ export default function LoginForm() {
 
   return (
     <main className="flex min-h-screen">
-      {/* ── Left panel (brand) ── hidden on mobile, visible lg+ ─────────────── */}
+      {/* ── Left panel (brand) ── hidden on mobile, visible lg+ ────────────── */}
       <div
         className="hidden lg:flex lg:w-1/2 flex-col justify-between p-10 xl:p-14"
         style={{
@@ -194,7 +194,7 @@ export default function LoginForm() {
         </p>
       </div>
 
-      {/* ── Right panel (auth) ──────────────────────────────────────────────── */}
+      {/* ── Right panel (auth) ───────────────────────────────────── */}
       <div className="flex w-full flex-col items-center justify-center bg-zinc-50 px-4 py-10 dark:bg-zinc-950 lg:w-1/2 lg:px-12 xl:px-20">
         <div className="w-full max-w-sm space-y-6">
           {/* Logo + back link */}
@@ -227,7 +227,7 @@ export default function LoginForm() {
               </TabsTrigger>
             </TabsList>
 
-            {/* ── Sign in tab ───────────────────────────────────────────────── */}
+            {/* ── Sign in tab ────────────────────────────────── */}
             <TabsContent value="signin">
               <div className="mt-4 space-y-4">
                 <div className="space-y-1">
@@ -265,7 +265,15 @@ export default function LoginForm() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="signin-password">Password</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="signin-password">Password</Label>
+                      <Link
+                        href="/forgot-password"
+                        className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                      >
+                        Forgot password?
+                      </Link>
+                    </div>
                     <Input
                       id="signin-password"
                       type="password"
@@ -288,7 +296,7 @@ export default function LoginForm() {
               </div>
             </TabsContent>
 
-            {/* ── Sign up tab ───────────────────────────────────────────────── */}
+            {/* ── Sign up tab ────────────────────────────────── */}
             <TabsContent value="signup">
               <div className="mt-4 space-y-4">
                 <div className="space-y-1">
