@@ -17,7 +17,7 @@ from app.schemas.alert import (
     SnoozeRequest,
     SnoozeResponse,
 )
-from app.services import alert_engine, alert_service
+from app.services import alert_engine, alert_service, secrets_service
 
 router = APIRouter(tags=["alerts"])
 
@@ -25,10 +25,26 @@ _read = require_permission("policy:read")
 _configure = require_permission("alert:configure")
 
 
-def verify_cron(request: Request) -> None:
-    """Machine-only endpoint guard — pg_cron/Vercel Cron sends X-Cron-Secret."""
+async def verify_cron(request: Request) -> None:
+    """Machine-only endpoint guard — pg_cron/Vercel Cron sends X-Cron-Secret.
+
+    The expected secret is resolved from platform_settings (key ``cron_secret``)
+    with the ``CRON_SECRET`` env var as fallback, so the schedule can be configured
+    without redeploying. If neither is set, the endpoint stays closed (404).
+    """
     secret = request.headers.get("X-Cron-Secret", "")
-    if not settings.cron_secret or secret != settings.cron_secret:
+    expected = settings.cron_secret
+    try:
+        from app.db.session import _SessionLocal
+
+        if _SessionLocal is not None:
+            async with _SessionLocal() as db:
+                expected = await secrets_service.get_secret(
+                    db, "cron_secret", settings.cron_secret
+                )
+    except Exception:  # noqa: BLE001 — fall back to the env value on any DB error
+        expected = settings.cron_secret
+    if not expected or secret != expected:
         raise not_found("Not found")  # 404 hides the endpoint
 
 
