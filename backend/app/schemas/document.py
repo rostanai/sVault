@@ -29,6 +29,15 @@ class RecordDocumentRequest(BaseModel):
     content_type: str | None = None
     size_bytes: int | None = None
     doc_type: DocType = "policy"
+    content_hash: str | None = None  # hex SHA-256 of file bytes; used for dedup
+
+
+class DuplicateDocumentDetail(BaseModel):
+    """Returned in the error.details of a duplicate_document 409 — the existing doc."""
+
+    id: uuid.UUID
+    file_name: str
+    created_at: datetime
 
 
 class DocumentRead(BaseModel):

@@ -14,7 +14,11 @@ from app.core import storage
 from app.core.errors import AppError, ErrorCode, not_found
 from app.core.security import CurrentUser
 from app.db.models import PolicyDocument
-from app.schemas.document import RecordDocumentRequest, UploadUrlRequest
+from app.schemas.document import (
+    DuplicateDocumentDetail,
+    RecordDocumentRequest,
+    UploadUrlRequest,
+)
 from app.services import policy_service
 
 log = logging.getLogger("svault.documents")
@@ -43,6 +47,38 @@ async def record_document(
     expected_prefix = f"{policy.tenant_id}/{policy.id}/"
     if not payload.storage_path.startswith(expected_prefix):
         raise AppError(ErrorCode.validation_error, "storage_path does not match policy")
+
+    # Duplicate detection: if the client sent a content_hash (hex SHA-256 of the
+    # file bytes), block re-uploading an identical file to the same policy. Uses the
+    # (tenant_id, policy_id, content_hash) index. The bytes were already PUT to
+    # storage by the time we're called, so best-effort delete the orphan object.
+    if payload.content_hash:
+        existing = (
+            await db.execute(
+                select(PolicyDocument)
+                .where(
+                    PolicyDocument.tenant_id == policy.tenant_id,
+                    PolicyDocument.policy_id == policy.id,
+                    PolicyDocument.content_hash == payload.content_hash,
+                )
+                .limit(1)
+            )
+        ).scalars().first()
+        if existing is not None:
+            try:
+                await storage.delete_object(payload.storage_path)
+            except Exception:  # noqa: BLE001 — cleanup must not mask the real response
+                log.warning("duplicate_orphan_cleanup_failed | path=%s", payload.storage_path)
+            raise AppError(
+                ErrorCode.duplicate_document,
+                "This document has already been uploaded to this policy.",
+                details=DuplicateDocumentDetail(
+                    id=existing.id,
+                    file_name=existing.file_name,
+                    created_at=existing.created_at,
+                ).model_dump(mode="json"),
+            )
+
     doc = PolicyDocument(
         tenant_id=policy.tenant_id,
         org_id=policy.org_id,
@@ -52,6 +88,7 @@ async def record_document(
         file_name=payload.file_name,
         mime_type=payload.content_type,
         size_bytes=payload.size_bytes,
+        content_hash=payload.content_hash,
         uploaded_by=uuid.UUID(user.user_id),
     )
     db.add(doc)
